@@ -1,0 +1,19 @@
+{
+  "name": "x402-mcp-agentcost",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Pay-Per-Call x402 v2 MCP Server on Cloudflare Workers for AI Agent O(N^2) Cost Simulation, Pareto Model Routing & Prompt Cache Auditing",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --temporary"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
+    "wrangler": "^4.0.0"
+  }
+}
