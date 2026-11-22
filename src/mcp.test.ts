@@ -150,4 +150,26 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     const json = (await res.json()) as { result: { structuredContent: { warnings: unknown[] } } };
     expect(json.result.structuredContent.warnings.length).toBeGreaterThanOrEqual(2);
   });
+
+  it('exposes direct REST x402 endpoint with Coinbase Bazaar extensions.bazaar discovery metadata', async () => {
+    const unpaidReq = new Request('https://agentcostlab.workers.dev/api/recommend-pareto-route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turns: 24 }),
+    });
+    const res402 = await handleMcpRequest(unpaidReq, baseEnv);
+    expect(res402.status).toBe(402);
+    const body = (await res402.json()) as X402ChallengePayload;
+    expect(body.extensions?.bazaar?.info.input.method).toBe('POST');
+    expect(body.extensions?.bazaar?.schema).toBeTruthy();
+
+    const demoReq = new Request('https://agentcostlab.workers.dev/api/recommend-pareto-route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-DEMO-MODE': 'true' },
+      body: JSON.stringify({ turns: 24, minSweBenchPct: 80 }),
+    });
+    const res200 = await handleMcpRequest(demoReq, baseEnv);
+    expect(res200.status).toBe(200);
+    expect(res200.headers.get('PAYMENT-RESPONSE')).toBeTruthy();
+  });
 });

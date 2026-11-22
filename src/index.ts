@@ -318,6 +318,33 @@ function executeTool(name: string, args: Record<string, unknown>): unknown {
   throw new Error(`Unknown tool: ${name}`);
 }
 
+const TOOL_EXAMPLES: Record<
+  string,
+  { input: Record<string, unknown>; output: Record<string, unknown> }
+> = {
+  simulate_agent_cost: {
+    input: { modelId: 'claude-sonnet-5-5', turns: 24, staticPrefixTokens: 12000, enableCaching: true },
+    output: { perRunCostUsd: 1.377, monthlyCostUsd: 1211.76, quadraticMultiplier: 4.2 },
+  },
+  audit_prompt_cache_tax: {
+    input: { content: '# CLAUDE.md\nAlways run npm test before committing.', turns: 20, modelId: 'claude-sonnet-5-5' },
+    output: { estimatedTokens: 14, costPer1kRunsUncached: 0.56, costPer1kRunsCached: 0.088, warnings: [] },
+  },
+  recommend_pareto_route: {
+    input: { turns: 24, staticPrefixTokens: 12000, minSweBenchPct: 78, runsPerDay: 40 },
+    output: {
+      recommendedSingleModel: { name: 'Gemini 4 Carbon', valueScore: 65, isParetoOptimal: true },
+      recommendedHybridRoute: { planner: 'Gemini 4 Carbon', worker: 'DeepSeek V4.1 Flash (Off-Peak)', extraSavingsPct: 72.9 },
+    },
+  },
+};
+
+const REST_TOOL_ROUTES: Record<string, string> = {
+  '/api/simulate-agent-cost': 'simulate_agent_cost',
+  '/api/audit-prompt-cache': 'audit_prompt_cache_tax',
+  '/api/recommend-pareto-route': 'recommend_pareto_route',
+};
+
 export async function handleMcpRequest(
   request: Request,
   env: WorkerEnv,
@@ -350,7 +377,9 @@ export async function handleMcpRequest(
           protocol: 'model-context-protocol',
           transport: 'streamable-http',
           endpoint: `${url.origin}/mcp`,
+          restEndpoints: Object.keys(REST_TOOL_ROUTES).map((p) => `${url.origin}${p}`),
           paymentProtocol: 'x402-v2',
+          bazaarDiscovery: true,
           network: env.X402_NETWORK || 'eip155:8453',
           asset: env.X402_ASSET || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
           tools: MCP_TOOLS.map((t) => ({
@@ -367,6 +396,52 @@ export async function handleMcpRequest(
         headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
       }
     );
+  }
+
+  // Direct REST x402 endpoints for x402 Bazaar & x402scan.com indexing
+  const restToolName = REST_TOOL_ROUTES[url.pathname];
+  if (restToolName && (request.method === 'POST' || request.method === 'GET')) {
+    const toolDef = MCP_TOOLS.find((t) => t.name === restToolName)!;
+    const ex = TOOL_EXAMPLES[toolDef.name];
+    const challenge = buildPaymentChallenge(env, {
+      resource: `${url.origin}${url.pathname}`,
+      priceUsd: toolDef.priceUsd,
+      description: toolDef.description,
+      inputSchema: toolDef.inputSchema,
+      exampleInput: ex?.input,
+      exampleOutput: ex?.output,
+    });
+
+    const verification = await verifyAndSettleX402(request, env, challenge, fetchImpl);
+    if (!verification.valid) {
+      return create402Response(challenge, CORS_HEADERS);
+    }
+
+    let args: Record<string, unknown> = {};
+    if (request.method === 'POST') {
+      try {
+        const parsed = await request.json();
+        if (parsed && typeof parsed === 'object') args = parsed as Record<string, unknown>;
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
+    }
+
+    const output = executeTool(toolDef.name, args);
+    return new Response(JSON.stringify(output, null, 2), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'PAYMENT-RESPONSE': buildPaymentReceiptHeader(
+          verification,
+          env.X402_NETWORK || 'eip155:8453'
+        ),
+        ...CORS_HEADERS,
+      },
+    });
   }
 
   if (request.method === 'POST' && url.pathname === '/mcp') {
@@ -420,10 +495,14 @@ export async function handleMcpRequest(
 
       // Enforce HTTP 402 / x402 payment on paid tools
       if (toolDef.priceUsd > 0) {
+        const ex = TOOL_EXAMPLES[toolDef.name];
         const challenge = buildPaymentChallenge(env, {
           resource: `${url.origin}/mcp#${toolDef.name}`,
           priceUsd: toolDef.priceUsd,
           description: toolDef.description,
+          inputSchema: toolDef.inputSchema,
+          exampleInput: ex?.input,
+          exampleOutput: ex?.output,
         });
 
         const verification = await verifyAndSettleX402(request, env, challenge, fetchImpl);

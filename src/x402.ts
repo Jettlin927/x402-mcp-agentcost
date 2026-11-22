@@ -43,6 +43,23 @@ export interface X402ChallengePayload {
   x402Version: 2;
   error: string;
   accepts: X402PaymentOption[];
+  extensions?: {
+    bazaar?: {
+      info: {
+        input: {
+          type: 'http';
+          method: 'POST';
+          bodyType: 'json';
+          body: Record<string, unknown>;
+        };
+        output: {
+          type: 'json';
+          example: Record<string, unknown>;
+        };
+      };
+      schema: Record<string, unknown>;
+    };
+  };
 }
 
 export interface X402VerifyResult {
@@ -84,9 +101,16 @@ export function decodeBase64Json<T = unknown>(b64: string): T {
 
 export function buildPaymentChallenge(
   env: X402Env,
-  opts: { resource: string; priceUsd: number; description: string }
+  opts: {
+    resource: string;
+    priceUsd: number;
+    description: string;
+    inputSchema?: Record<string, unknown>;
+    exampleInput?: Record<string, unknown>;
+    exampleOutput?: Record<string, unknown>;
+  }
 ): X402ChallengePayload {
-  return {
+  const payload: X402ChallengePayload = {
     x402Version: 2,
     error: `Payment required: $${opts.priceUsd.toFixed(4)} USDC via x402 to invoke ${opts.resource}`,
     accepts: [
@@ -108,6 +132,28 @@ export function buildPaymentChallenge(
       },
     ],
   };
+
+  if (opts.inputSchema && opts.exampleInput) {
+    payload.extensions = {
+      bazaar: {
+        info: {
+          input: {
+            type: 'http',
+            method: 'POST',
+            bodyType: 'json',
+            body: opts.exampleInput,
+          },
+          output: {
+            type: 'json',
+            example: opts.exampleOutput || { ok: true },
+          },
+        },
+        schema: opts.inputSchema,
+      },
+    };
+  }
+
+  return payload;
 }
 
 export function create402Response(
