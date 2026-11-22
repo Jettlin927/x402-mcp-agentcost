@@ -364,10 +364,85 @@ export async function handleMcpRequest(
     });
   }
 
+  // Standard /llms.txt for AI crawlers & autonomous agent discovery
+  if (request.method === 'GET' && url.pathname === '/llms.txt') {
+    const llmsTxt = `# AgentCostLab x402 MCP & REST API
+
+> Pay-per-call Cloudflare Workers service for multi-turn AI agent O(N^2) cost simulation, Pareto-optimal Planner/Worker model routing across 15 LLMs (Nov 2026 pricing), and CLAUDE.md / mcp.json prompt cache-buster auditing.
+
+## Endpoints
+- MCP Streamable HTTP (JSON-RPC 2.0): ${url.origin}/mcp
+- MCP Discovery: ${url.origin}/.well-known/mcp.json
+- x402 Discovery: ${url.origin}/.well-known/x402.json
+- OpenAPI 3.1 Spec: ${url.origin}/openapi.json
+- Web Simulator: https://jettlin927.github.io/agentcostlab/
+
+## Paid x402 v2 REST Resources (Base Mainnet USDC, eip155:8453)
+- POST ${url.origin}/api/recommend-pareto-route ($0.005 USDC) — Compute Pareto-optimal model + Hybrid Planner/Worker route
+- POST ${url.origin}/api/simulate-agent-cost ($0.005 USDC) — Simulate O(N^2) multi-turn loop & prompt caching savings
+- POST ${url.origin}/api/audit-prompt-cache ($0.010 USDC) — Audit CLAUDE.md / AGENTS.md / mcp.json for token tax, secrets & cache-busters
+
+## Free Tools (via POST /mcp)
+- tools/list — List all tools and schemas
+- list_models_pricing — Retrieve 15 LLMs with Nov 2026 pricing, AA Intelligence Index & SWE-bench Verified scores
+`;
+    return new Response(llmsTxt, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', ...CORS_HEADERS },
+    });
+  }
+
+  // OpenAPI 3.1 schema for ChatGPT Actions, AgentCore & x402 directories
+  if (request.method === 'GET' && url.pathname === '/openapi.json') {
+    const openapi = {
+      openapi: '3.1.0',
+      info: {
+        title: 'AgentCostLab x402 API',
+        version: '1.0.0',
+        description:
+          'Pay-per-call x402 v2 API on Cloudflare Workers for multi-turn AI agent cost simulation, Pareto model routing, and prompt cache auditing.',
+      },
+      servers: [{ url: url.origin }],
+      paths: Object.fromEntries(
+        Object.entries(REST_TOOL_ROUTES).map(([routePath, toolName]) => {
+          const tool = MCP_TOOLS.find((t) => t.name === toolName)!;
+          return [
+            routePath,
+            {
+              post: {
+                operationId: tool.name,
+                summary: tool.description,
+                'x-x402-price-usd': tool.priceUsd,
+                'x-x402-network': env.X402_NETWORK || 'eip155:8453',
+                requestBody: {
+                  required: true,
+                  content: {
+                    'application/json': { schema: tool.inputSchema },
+                  },
+                },
+                responses: {
+                  '200': { description: 'Successful execution with PAYMENT-RESPONSE receipt header' },
+                  '402': { description: 'Payment Required with PAYMENT-REQUIRED x402 v2 challenge header' },
+                },
+              },
+            },
+          ];
+        })
+      ),
+    };
+    return new Response(JSON.stringify(openapi, null, 2), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    });
+  }
+
   // Machine-readable discovery manifest for MCP registries & x402 marketplaces
   if (
     request.method === 'GET' &&
-    (url.pathname === '/' || url.pathname === '/.well-known/mcp.json' || url.pathname === '/mcp')
+    (url.pathname === '/' ||
+      url.pathname === '/.well-known/mcp.json' ||
+      url.pathname === '/.well-known/x402.json' ||
+      url.pathname === '/mcp')
   ) {
     return new Response(
       JSON.stringify(

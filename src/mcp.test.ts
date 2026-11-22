@@ -172,4 +172,28 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     expect(res200.status).toBe(200);
     expect(res200.headers.get('PAYMENT-RESPONSE')).toBeTruthy();
   });
+
+  it('serves /.well-known/x402.json, /llms.txt, and /openapi.json discovery endpoints', async () => {
+    const x402Res = await handleMcpRequest(
+      new Request('https://agentcostlab.workers.dev/.well-known/x402.json'),
+      baseEnv
+    );
+    expect(x402Res.status).toBe(200);
+
+    const llmsRes = await handleMcpRequest(
+      new Request('https://agentcostlab.workers.dev/llms.txt'),
+      baseEnv
+    );
+    expect(llmsRes.status).toBe(200);
+    expect(await llmsRes.text()).toContain('/api/recommend-pareto-route');
+
+    const oaRes = await handleMcpRequest(
+      new Request('https://agentcostlab.workers.dev/openapi.json'),
+      baseEnv
+    );
+    expect(oaRes.status).toBe(200);
+    const oaJson = (await oaRes.json()) as { openapi: string; paths: Record<string, unknown> };
+    expect(oaJson.openapi).toBe('3.1.0');
+    expect(oaJson.paths['/api/recommend-pareto-route']).toBeTruthy();
+  });
 });
