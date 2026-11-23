@@ -56,6 +56,26 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { result: { structuredContent: { count: number } } };
     expect(json.result.structuredContent.count).toBeGreaterThanOrEqual(4);
+
+    const allRes = await handleMcpRequest(
+      makeRpcRequest({
+        jsonrpc: '2.0',
+        id: 31,
+        method: 'tools/call',
+        params: { name: 'list_models_pricing', arguments: { tier: 'all' } },
+      }),
+      baseEnv
+    );
+    expect(allRes.status).toBe(200);
+    const allJson = (await allRes.json()) as {
+      result: { structuredContent: { count: number; models: { id: string }[] } };
+    };
+    expect(allJson.result.structuredContent.count).toBeGreaterThanOrEqual(20);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'gpt-6-1-terra')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-neon')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-hydrogen')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'qwen4-max')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'kimi-k3-1-pro')).toBe(true);
   });
 
   it('returns HTTP 402 Payment Required with valid x402 v2 PAYMENT-REQUIRED header on unpaid paid tool', async () => {

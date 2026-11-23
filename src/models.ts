@@ -1,4 +1,4 @@
-export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'custom';
+export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'qwen' | 'moonshot' | 'custom';
 export type ModelTier = 'frontier' | 'balanced' | 'economy';
 
 export interface LLMModel {
@@ -147,15 +147,33 @@ export const MODELS: LLMModel[] = [
     noteZh: '旗舰规划模型，最适合与 Luna 搭配混合路由',
   },
   {
+    id: 'gpt-6-1-terra',
+    name: 'GPT-6.1 Terra',
+    provider: 'openai',
+    providerLabel: 'OpenAI',
+    tier: 'balanced',
+    inputPerM: 1.0,
+    cachedInputPerM: 0.05,
+    cacheWriteMultiplier: 1.25,
+    outputPerM: 5.0,
+    contextWindow: 1_050_000,
+    intelligenceIndex: 51,
+    // SWE-bench Verified N/A; uses published Terminal-Bench 4.0 max-reasoning pass rate (50.3%)
+    sweBenchPct: 50.3,
+    speedTokPerSec: 70,
+    note: 'Oct 2026 release: 95% cache discount ($0.05/M), AA Index 51, Terminal-Bench 4.0 50.3%, 272k long-ctx tier',
+    noteZh: '10月发布：95% 缓存折扣 ($0.05/M)，AA 智商 51，Terminal-Bench 4.0 达 50.3%，272k 后触发长上下文阶梯计费',
+  },
+  {
     id: 'gpt-6-luna',
     name: 'GPT-6 Luna',
     provider: 'openai',
     providerLabel: 'OpenAI',
     tier: 'economy',
-    inputPerM: 0.15,
-    cachedInputPerM: 0.015,
+    inputPerM: 0.1,
+    cachedInputPerM: 0.01,
     cacheWriteMultiplier: 1.0,
-    outputPerM: 0.6,
+    outputPerM: 0.5,
     contextWindow: 400_000,
     intelligenceIndex: 43,
     sweBenchPct: 65.0,
@@ -165,6 +183,24 @@ export const MODELS: LLMModel[] = [
   },
 
   // Google Gemini
+  {
+    id: 'gemini-4-neon',
+    name: 'Gemini 4 Neon',
+    provider: 'google',
+    providerLabel: 'Google',
+    tier: 'frontier',
+    inputPerM: 3.0,
+    cachedInputPerM: 0.15,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 15.0,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 61,
+    // SWE-bench Verified N/A; uses published SWE-sweep Antigravity harness pass rate (39.0% vs 12.8% mini-SWE)
+    sweBenchPct: 39.0,
+    speedTokPerSec: 110,
+    note: 'Nov 18 release: AA Index 61, #1 AA Coding Agent (58.6); SWE-sweep 39.0% (Antigravity) vs 12.8% (mini-SWE)',
+    noteZh: '11月18日发布：AA 智商指数 61、Coding Agent 榜第1 (58.6)；SWE-sweep 39.0% (Antigravity) vs 12.8% (mini-SWE)',
+  },
   {
     id: 'gemini-4-carbon',
     name: 'Gemini 4 Carbon',
@@ -179,8 +215,8 @@ export const MODELS: LLMModel[] = [
     intelligenceIndex: 60,
     sweBenchPct: 82.5,
     speedTokPerSec: 84,
-    note: '2M context frontier reasoning & agentic model',
-    noteZh: '200 万上下文旗舰推理与 Agent 模型',
+    note: '2M context frontier model (scheduled $2/$10 -> $4/$20 price hike on Dec 1, 2026)',
+    noteZh: '200 万上下文旗舰模型（将于 2026-12-01 从 $2/$10 涨价至 $4/$20）',
   },
   {
     id: 'gemini-4-argon',
@@ -198,6 +234,24 @@ export const MODELS: LLMModel[] = [
     speedTokPerSec: 108,
     note: 'Balanced long-context model for repo-wide analysis',
     noteZh: '均衡长上下文模型，适合全仓库代码分析',
+  },
+  {
+    id: 'gemini-4-hydrogen',
+    name: 'Gemini 4 Hydrogen',
+    provider: 'google',
+    providerLabel: 'Google',
+    tier: 'balanced',
+    inputPerM: 1.5,
+    cachedInputPerM: 0.075,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 7.5,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 51,
+    // SWE-bench Verified N/A; uses published Terminal-Bench 4.1 high-thinking pass rate (57.0%)
+    sweBenchPct: 57.0,
+    speedTokPerSec: 164,
+    note: 'Nov 12 release: 95% cache discount ($0.075/M), Terminal-Bench 4.1 57.0%, AA Index 51 (54 xhigh)',
+    noteZh: '11月12日发布：95% 缓存折扣 ($0.075/M)，Terminal-Bench 4.1 57.0%，AA 智商 51（xhigh 达 54）',
   },
   {
     id: 'gemini-3-8-flash',
@@ -302,6 +356,46 @@ export const MODELS: LLMModel[] = [
     speedTokPerSec: 120,
     note: 'Peak economy model with $0.006/M cached reads',
     noteZh: '高峰经济档，缓存读取仅 $0.006 / 百万 Token',
+  },
+
+  // Alibaba Qwen
+  {
+    id: 'qwen4-max',
+    name: 'Qwen4-Max',
+    provider: 'qwen',
+    providerLabel: 'Alibaba Qwen',
+    tier: 'balanced',
+    inputPerM: 1.5,
+    cachedInputPerM: 0.075,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 4.5,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 43,
+    // SWE-bench Verified N/A; uses published DeepSWE v1.1 agentic coding score (75.7%)
+    sweBenchPct: 75.7,
+    speedTokPerSec: 65,
+    note: 'Nov 16 release: 95% cache discount; DeepSWE v1.1 75.7%, Terminal-Bench 4.0 48.5%',
+    noteZh: '11月16日发布：95% 缓存折扣；DeepSWE v1.1 75.7%、Terminal-Bench 4.0 48.5%',
+  },
+
+  // Moonshot AI
+  {
+    id: 'kimi-k3-1-pro',
+    name: 'Kimi K3.1 Pro',
+    provider: 'moonshot',
+    providerLabel: 'Moonshot AI',
+    tier: 'frontier',
+    inputPerM: 2.0,
+    cachedInputPerM: 0.2,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 10.0,
+    contextWindow: 1_048_576,
+    intelligenceIndex: 55,
+    // SWE-bench Verified N/A; uses published Terminal-Bench 4.0 pass rate (67.0%)
+    sweBenchPct: 67.0,
+    speedTokPerSec: 73,
+    note: 'Apache 2.0 2.8T MoE open-weight frontier: 90% cache discount, AA Index 55, Terminal-Bench 4.0 67.0%',
+    noteZh: 'Apache 2.0 2.8T MoE 开源旗舰：90% 缓存折扣，AA 智商 55，Terminal-Bench 4.0 达 67.0%',
   },
 ];
 

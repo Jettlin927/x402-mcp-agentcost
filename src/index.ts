@@ -45,7 +45,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'list_models_pricing',
     priceUsd: 0,
     description:
-      '[FREE] List all 15+ LLM models with Nov 2026 API pricing (input, cached input, output), context windows, Artificial Analysis Intelligence Index, and SWE-bench Verified pass rates.',
+      `[FREE] List all ${MODELS.length} LLM models with Nov 2026 API pricing (input, cached input, output), context windows, Artificial Analysis Intelligence Index, and coding benchmarks.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -368,7 +368,7 @@ export async function handleMcpRequest(
   if (request.method === 'GET' && url.pathname === '/llms.txt') {
     const llmsTxt = `# AgentCostLab x402 MCP & REST API
 
-> Pay-per-call Cloudflare Workers service for multi-turn AI agent O(N^2) cost simulation, Pareto-optimal Planner/Worker model routing across 15 LLMs (Nov 2026 pricing), and CLAUDE.md / mcp.json prompt cache-buster auditing.
+> Pay-per-call Cloudflare Workers service for multi-turn AI agent O(N^2) cost simulation, Pareto-optimal Planner/Worker model routing across ${MODELS.length} LLMs (Nov 2026 pricing), and CLAUDE.md / mcp.json prompt cache-buster auditing.
 
 ## Endpoints
 - MCP Streamable HTTP (JSON-RPC 2.0): ${url.origin}/mcp
@@ -384,7 +384,7 @@ export async function handleMcpRequest(
 
 ## Free Tools (via POST /mcp)
 - tools/list — List all tools and schemas
-- list_models_pricing — Retrieve 15 LLMs with Nov 2026 pricing, AA Intelligence Index & SWE-bench Verified scores
+- list_models_pricing — Retrieve ${MODELS.length} LLMs with Nov 2026 pricing, AA Intelligence Index & coding benchmarks
 `;
     return new Response(llmsTxt, {
       status: 200,

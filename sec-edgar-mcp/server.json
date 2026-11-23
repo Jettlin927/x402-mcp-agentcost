@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Jettlin927/x402-mcp-sec-edgar",
+  "title": "SEC EDGAR Financial Facts x402 MCP",
+  "description": "Zero-hallucination SEC EDGAR XBRL financial statements, filing links, and multi-ticker peer comparison for AI research and trading agents via Streamable HTTP MCP and x402 v2 Base USDC micropayments.",
+  "version": "1.0.0",
+  "repository": {
+    "url": "https://github.com/Jettlin927/x402-mcp-agentcost",
+    "source": "github",
+    "subfolder": "sec-edgar-mcp"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://x402-mcp-sec-edgar.jettlin666.workers.dev/mcp"
+    }
+  ]
+}

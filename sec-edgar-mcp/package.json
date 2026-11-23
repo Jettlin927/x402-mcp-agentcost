@@ -1,0 +1,19 @@
+{
+  "name": "x402-mcp-sec-edgar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pay-Per-Call x402 v2 MCP & REST Server on Cloudflare Workers for Zero-Hallucination SEC EDGAR XBRL Financial Facts, Filings & Peer Comparison",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --temporary"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
+    "wrangler": "^4.0.0"
+  }
+}
