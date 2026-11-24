@@ -1,5 +1,7 @@
 # x402-mcp-agentcost
 
+[![Jettlin927/x402-mcp-agentcost MCP server](https://glama.ai/mcp/servers/Jettlin927/x402-mcp-agentcost/badges/score.svg)](https://glama.ai/mcp/servers/Jettlin927/x402-mcp-agentcost)
+
 Standalone **Pay-Per-Call MCP Server** built for **Cloudflare Workers** implementing the **x402 v2 (`HTTP 402 Payment Required`)** machine-to-machine micropayment protocol over Base USDC.
 
 - **Web Companion UI**: [AgentCostLab](https://jettlin927.github.io/agentcostlab/) (`Jettlin927/agentcostlab`)
