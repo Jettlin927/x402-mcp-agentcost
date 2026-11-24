@@ -94,6 +94,104 @@ export interface FilingItem {
   filingUrl: string;
 }
 
+export interface InsiderTransaction {
+  accessionNumber: string;
+  filingDate: string;
+  periodOfReport: string | null;
+  insiderName: string;
+  insiderCik: string | null;
+  officerTitle: string | null;
+  isDirector: boolean;
+  isOfficer: boolean;
+  isTenPercentOwner: boolean;
+  is10b5One: boolean;
+  securityTitle: string;
+  transactionDate: string;
+  transactionCode: string;
+  shares: number;
+  pricePerShare: number | null;
+  totalValueUsd: number | null;
+  acquiredOrDisposed: 'A' | 'D' | null;
+  sharesOwnedFollowing: number | null;
+  ownershipType: 'D' | 'I' | null;
+  xmlUrl: string;
+}
+
+export interface InsiderTradesReport {
+  company: {
+    cik: string;
+    ticker: string | null;
+    name: string;
+  };
+  filingsScanned: number;
+  summary: {
+    totalTransactions: number;
+    openMarketBuysShares: number;
+    openMarketBuysUsd: number;
+    openMarketSellsShares: number;
+    openMarketSellsUsd: number;
+    netOpenMarketUsd: number;
+  };
+  transactions: InsiderTransaction[];
+  provenance: {
+    source: 'SEC EDGAR Form 4 Ownership XML';
+    submissionsUrl: string;
+  };
+}
+
+export interface SecSearchHit {
+  accessionNumber: string;
+  form: string;
+  fileDate: string;
+  periodEnding: string | null;
+  displayNames: string[];
+  ciks: string[];
+  items: string[];
+  fileDescription: string | null;
+  documentUrl: string;
+}
+
+export interface SecSearchReport {
+  query: string;
+  totalHits: number;
+  returned: number;
+  hits: SecSearchHit[];
+  provenance: {
+    source: 'SEC EDGAR Full-Text Search (EFTS)';
+    searchUrl: string;
+  };
+}
+
+export interface SecFilingExcerptResult {
+  company: {
+    cik: string;
+    ticker: string | null;
+    name: string;
+  };
+  filing: {
+    accessionNumber: string;
+    form: string;
+    filingDate: string;
+    reportDate: string;
+    primaryDocument: string;
+    items: string[];
+    filingUrl: string;
+  };
+  extraction: {
+    totalPlainChars: number;
+    returnedChars: number;
+    truncated: boolean;
+    matchedSection: string | null;
+    detectedSections: string[];
+    excerpt: string;
+  };
+  provenance: {
+    source: 'SEC EDGAR Primary Filing Document';
+    submissionsUrl: string;
+    filingUrl: string;
+  };
+}
+
 export interface FinancialSnapshot {
   company: {
     cik: string;
@@ -153,17 +251,19 @@ export function padCik(input: string | number): string {
   return digits.padStart(10, '0');
 }
 
-function getSecHeaders(env: EdgarEnv): Record<string, string> {
+function getSecHeaders(env: EdgarEnv, accept = 'application/json'): Record<string, string> {
   return {
     'User-Agent': env.SEC_USER_AGENT || DEFAULT_USER_AGENT,
-    Accept: 'application/json',
+    Accept: accept,
   };
 }
 
-async function fetchSecJson<T>(
+async function fetchSecCached<T>(
   url: string,
   env: EdgarEnv,
   ttlMs: number,
+  accept: string,
+  parse: (res: Response) => Promise<T>,
   fetchImpl: typeof fetch = fetch
 ): Promise<T> {
   const now = Date.now();
@@ -172,13 +272,38 @@ async function fetchSecJson<T>(
     return hit.value as T;
   }
 
-  const res = await fetchImpl(url, { headers: getSecHeaders(env) });
+  const res = await fetchImpl(url, { headers: getSecHeaders(env, accept) });
   if (!res.ok) {
     throw new Error(`SEC EDGAR HTTP ${res.status} for ${url}`);
   }
-  const data = (await res.json()) as T;
+  const data = await parse(res);
   cache.set(url, { value: data, expiresAt: now + ttlMs });
   return data;
+}
+
+async function fetchSecJson<T>(
+  url: string,
+  env: EdgarEnv,
+  ttlMs: number,
+  fetchImpl: typeof fetch = fetch
+): Promise<T> {
+  return fetchSecCached<T>(url, env, ttlMs, 'application/json', (r) => r.json() as Promise<T>, fetchImpl);
+}
+
+async function fetchSecText(
+  url: string,
+  env: EdgarEnv,
+  ttlMs: number,
+  fetchImpl: typeof fetch = fetch
+): Promise<string> {
+  return fetchSecCached<string>(
+    url,
+    env,
+    ttlMs,
+    'application/xml, text/xml, text/plain',
+    (r) => r.text(),
+    fetchImpl
+  );
 }
 
 function toTickerEntry(cikNumber: number, ticker: string, title: string): TickerEntry {
@@ -550,6 +675,19 @@ export async function getFinancialSnapshot(
   };
 }
 
+function parseRecentItems(rawItems: string[] | string | undefined): string[] {
+  if (Array.isArray(rawItems)) return rawItems.map(String);
+  if (typeof rawItems === 'string' && rawItems.length > 0) {
+    return rawItems.split(',').map((s) => s.trim());
+  }
+  return [];
+}
+
+function formatSecFilingUrl(cikNumber: number, accessionNumber: string, primaryDocument: string): string {
+  const accnNoDashes = accessionNumber.replace(/-/g, '');
+  return `https://www.sec.gov/Archives/edgar/data/${cikNumber}/${accnNoDashes}/${primaryDocument}`;
+}
+
 export async function getRecentFilings(
   params: {
     tickerOrCik: string;
@@ -599,13 +737,7 @@ export async function getRecentFilings(
 
     const accn = recent.accessionNumber[i];
     const primaryDocument = recent.primaryDocument[i] ?? '';
-    const accnNoDashes = accn.replace(/-/g, '');
-    const rawItems = recent.items?.[i];
-    const items = Array.isArray(rawItems)
-      ? rawItems.map(String)
-      : typeof rawItems === 'string' && rawItems.length > 0
-        ? rawItems.split(',').map((s) => s.trim())
-        : [];
+    const items = parseRecentItems(recent.items?.[i]);
 
     filings.push({
       accessionNumber: accn,
@@ -616,7 +748,7 @@ export async function getRecentFilings(
       description: recent.primaryDocDescription?.[i] ?? '',
       items,
       isXBRL: Boolean(recent.isXBRL?.[i]),
-      filingUrl: `https://www.sec.gov/Archives/edgar/data/${entry.cikNumber}/${accnNoDashes}/${primaryDocument}`,
+      filingUrl: formatSecFilingUrl(entry.cikNumber, accn, primaryDocument),
     });
   }
 
@@ -669,5 +801,483 @@ export async function comparePeers(
       ...s.latestSummary,
       accessionNumbers: s.provenance.latestAccessionNumbers,
     })),
+  };
+}
+
+function decodeXmlEntities(raw: string): string {
+  return raw
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
+function extractTagBlock(xml: string, tag: string): string | null {
+  const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'i'));
+  return match ? match[1] : null;
+}
+
+function extractTagValue(xml: string, tag: string): string | null {
+  const block = extractTagBlock(xml, tag);
+  if (block === null) return null;
+  const nestedVal = block.match(/<value(?:\s[^>]*)?>([\s\S]*?)<\/value>/i);
+  const raw = nestedVal ? nestedVal[1] : block;
+  const clean = decodeXmlEntities(raw.replace(/<[^>]+>/g, ''));
+  return clean.length > 0 ? clean : null;
+}
+
+function parseXmlBool(val: string | null): boolean {
+  if (!val) return false;
+  const norm = val.trim().toLowerCase();
+  return norm === '1' || norm === 'true' || norm === 'y';
+}
+
+function parseXmlNumber(val: string | null): number | null {
+  if (!val) return null;
+  const n = Number(val.replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+export function parseForm4Xml(
+  xml: string,
+  meta: { accessionNumber: string; filingDate: string; xmlUrl: string }
+): InsiderTransaction[] {
+  const periodOfReport = extractTagValue(xml, 'periodOfReport');
+  const ownerBlock = extractTagBlock(xml, 'reportingOwner') ?? xml;
+  const insiderName = extractTagValue(ownerBlock, 'rptOwnerName') ?? 'Unknown Insider';
+  const insiderCik = extractTagValue(ownerBlock, 'rptOwnerCik');
+  const officerTitle = extractTagValue(ownerBlock, 'officerTitle');
+  const isDirector = parseXmlBool(extractTagValue(ownerBlock, 'isDirector'));
+  const isOfficer = parseXmlBool(extractTagValue(ownerBlock, 'isOfficer'));
+  const isTenPercentOwner = parseXmlBool(extractTagValue(ownerBlock, 'isTenPercentOwner'));
+  const is10b5One = parseXmlBool(extractTagValue(xml, 'aff10b5One'));
+
+  const txBlocks = Array.from(
+    xml.matchAll(/<nonDerivativeTransaction(?:\s[^>]*)?>([\s\S]*?)<\/nonDerivativeTransaction>/gi)
+  );
+
+  const transactions: InsiderTransaction[] = [];
+  for (const match of txBlocks) {
+    const block = match[1];
+    const shares = parseXmlNumber(extractTagValue(block, 'transactionShares'));
+    if (shares === null) continue;
+    const pricePerShare = parseXmlNumber(extractTagValue(block, 'transactionPricePerShare'));
+    const code = (extractTagValue(block, 'transactionCode') ?? '').toUpperCase();
+    const acqDispRaw = (extractTagValue(block, 'transactionAcquiredDisposedCode') ?? '').toUpperCase();
+    const acquiredOrDisposed = acqDispRaw === 'A' || acqDispRaw === 'D' ? acqDispRaw : null;
+    const ownershipRaw = (extractTagValue(block, 'directOrIndirectOwnership') ?? '').toUpperCase();
+    const ownershipType = ownershipRaw === 'D' || ownershipRaw === 'I' ? ownershipRaw : null;
+    const totalValueUsd =
+      pricePerShare !== null ? Math.round(shares * pricePerShare * 100) / 100 : null;
+
+    transactions.push({
+      accessionNumber: meta.accessionNumber,
+      filingDate: meta.filingDate,
+      periodOfReport,
+      insiderName,
+      insiderCik,
+      officerTitle,
+      isDirector,
+      isOfficer,
+      isTenPercentOwner,
+      is10b5One,
+      securityTitle: extractTagValue(block, 'securityTitle') ?? 'Common Stock',
+      transactionDate: extractTagValue(block, 'transactionDate') ?? meta.filingDate,
+      transactionCode: code,
+      shares,
+      pricePerShare,
+      totalValueUsd,
+      acquiredOrDisposed,
+      sharesOwnedFollowing: parseXmlNumber(extractTagValue(block, 'sharesOwnedFollowingTransaction')),
+      ownershipType,
+      xmlUrl: meta.xmlUrl,
+    });
+  }
+
+  return transactions;
+}
+
+export async function getInsiderTrades(
+  params: {
+    tickerOrCik: string;
+    limit?: number;
+  },
+  env: EdgarEnv,
+  fetchImpl: typeof fetch = fetch
+): Promise<InsiderTradesReport> {
+  const entry = await resolveExactCik(params.tickerOrCik, env, fetchImpl);
+  const subs = await fetchSecJson<SecSubmissionsJson>(
+    entry.submissionsUrl,
+    env,
+    ENTITY_TTL_MS,
+    fetchImpl
+  );
+
+  const recent = subs.filings?.recent;
+  if (!recent) {
+    throw new Error(`No recent filings payload found for CIK ${entry.cik}`);
+  }
+
+  const limit = Math.max(1, Math.min(10, params.limit ?? 5));
+  const form4Targets: Array<{ accessionNumber: string; filingDate: string; xmlUrl: string }> = [];
+  for (let i = 0; i < recent.accessionNumber.length && form4Targets.length < limit; i++) {
+    const form = (recent.form[i] ?? '').toUpperCase();
+    if (form !== '4' && form !== '4/A') continue;
+    const rawDoc = (recent.primaryDocument[i] ?? '').replace(/^xsl[^/]*\//i, '');
+    if (!rawDoc.toLowerCase().endsWith('.xml')) continue;
+    const accn = recent.accessionNumber[i];
+    const accnNoDashes = accn.replace(/-/g, '');
+    form4Targets.push({
+      accessionNumber: accn,
+      filingDate: recent.filingDate[i] ?? '',
+      xmlUrl: `https://www.sec.gov/Archives/edgar/data/${entry.cikNumber}/${accnNoDashes}/${rawDoc}`,
+    });
+  }
+
+  const parsedLists = await Promise.all(
+    form4Targets.map(async (target) => {
+      try {
+        const xml = await fetchSecText(target.xmlUrl, env, ENTITY_TTL_MS, fetchImpl);
+        return parseForm4Xml(xml, target);
+      } catch {
+        return [] as InsiderTransaction[];
+      }
+    })
+  );
+
+  const transactions = parsedLists.flat();
+  let openMarketBuysShares = 0;
+  let openMarketBuysUsd = 0;
+  let openMarketSellsShares = 0;
+  let openMarketSellsUsd = 0;
+
+  for (const tx of transactions) {
+    if (tx.transactionCode === 'P') {
+      openMarketBuysShares += tx.shares;
+      openMarketBuysUsd += tx.totalValueUsd ?? 0;
+    } else if (tx.transactionCode === 'S') {
+      openMarketSellsShares += tx.shares;
+      openMarketSellsUsd += tx.totalValueUsd ?? 0;
+    }
+  }
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  return {
+    company: {
+      cik: entry.cik,
+      ticker: subs.tickers?.[0] ?? (entry.ticker || null),
+      name: subs.name || entry.title,
+    },
+    filingsScanned: form4Targets.length,
+    summary: {
+      totalTransactions: transactions.length,
+      openMarketBuysShares: round2(openMarketBuysShares),
+      openMarketBuysUsd: round2(openMarketBuysUsd),
+      openMarketSellsShares: round2(openMarketSellsShares),
+      openMarketSellsUsd: round2(openMarketSellsUsd),
+      netOpenMarketUsd: round2(openMarketBuysUsd - openMarketSellsUsd),
+    },
+    transactions,
+    provenance: {
+      source: 'SEC EDGAR Form 4 Ownership XML',
+      submissionsUrl: entry.submissionsUrl,
+    },
+  };
+}
+
+interface EftsSearchResponse {
+  hits?: {
+    total?: { value?: number };
+    hits?: Array<{
+      _id?: string;
+      _source?: {
+        adsh?: string;
+        form?: string;
+        file_date?: string;
+        period_ending?: string;
+        display_names?: string[];
+        ciks?: string[];
+        items?: string[];
+        file_description?: string;
+      };
+    }>;
+  };
+}
+
+export async function searchSecFilings(
+  params: {
+    query: string;
+    tickerOrCik?: string;
+    forms?: string[];
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+  },
+  env: EdgarEnv,
+  fetchImpl: typeof fetch = fetch
+): Promise<SecSearchReport> {
+  const query = params.query.trim();
+  if (!query) {
+    throw new Error('query is required');
+  }
+
+  const searchParams = new URLSearchParams();
+  searchParams.set('q', query);
+  const limit = Math.max(1, Math.min(20, params.limit ?? 10));
+  searchParams.set('from', '0');
+  searchParams.set('size', String(limit));
+
+  if (params.tickerOrCik && params.tickerOrCik.trim()) {
+    const entry = await resolveExactCik(params.tickerOrCik, env, fetchImpl);
+    searchParams.set('ciks', entry.cik);
+  }
+  if (params.forms && params.forms.length > 0) {
+    searchParams.set('forms', params.forms.map((f) => f.trim().toUpperCase()).join(','));
+  }
+  if (params.startDate || params.endDate) {
+    searchParams.set('dateRange', 'custom');
+    if (params.startDate) searchParams.set('startdt', params.startDate);
+    if (params.endDate) searchParams.set('enddt', params.endDate);
+  }
+
+  const searchUrl = `https://efts.sec.gov/LATEST/search-index?${searchParams.toString()}`;
+  const raw = await fetchSecJson<EftsSearchResponse>(searchUrl, env, ENTITY_TTL_MS, fetchImpl);
+
+  const rawHits = raw.hits?.hits ?? [];
+  const hits: SecSearchHit[] = rawHits.map((h) => {
+    const src = h._source ?? {};
+    const adsh = src.adsh ?? '';
+    const ciks = src.ciks ?? [];
+    const primaryCikNum = ciks[0] ? Number(ciks[0]) : 0;
+    const idParts = (h._id ?? '').split(':');
+    const filename = idParts[1] ?? '';
+    const accnNoDashes = adsh.replace(/-/g, '');
+    const documentUrl =
+      primaryCikNum && accnNoDashes && filename
+        ? `https://www.sec.gov/Archives/edgar/data/${primaryCikNum}/${accnNoDashes}/${filename}`
+        : `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(query)}`;
+
+    return {
+      accessionNumber: adsh,
+      form: src.form ?? '',
+      fileDate: src.file_date ?? '',
+      periodEnding: src.period_ending ?? null,
+      displayNames: src.display_names ?? [],
+      ciks,
+      items: src.items ?? [],
+      fileDescription: src.file_description ?? null,
+      documentUrl,
+    };
+  });
+
+  return {
+    query,
+    totalHits: raw.hits?.total?.value ?? hits.length,
+    returned: hits.length,
+    hits,
+    provenance: {
+      source: 'SEC EDGAR Full-Text Search (EFTS)',
+      searchUrl,
+    },
+  };
+}
+
+function decodeHtmlEntities(raw: string): string {
+  return raw
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&mdash;|&#8212;/gi, '—')
+    .replace(/&ndash;|&#8211;/gi, '–')
+    .replace(/&rsquo;|&#8217;/gi, "'")
+    .replace(/&lsquo;|&#8216;/gi, "'")
+    .replace(/&rdquo;|&#8221;/gi, '"')
+    .replace(/&ldquo;|&#8220;/gi, '"')
+    .replace(/&#(\d+);/g, (_, code) => {
+      const n = Number(code);
+      return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      const n = parseInt(hex, 16);
+      return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+    });
+}
+
+/**
+ * Strip SEC HTML / Inline XBRL (iXBRL) hidden metadata, scripts, and markup into clean readable text.
+ */
+export function stripSecHtmlToText(rawHtml: string): string {
+  const withoutBoilerplate = rawHtml
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<ix:header\b[^>]*>[\s\S]*?<\/ix:header>/gi, '')
+    .replace(/<ix:hidden\b[^>]*>[\s\S]*?<\/ix:hidden>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, '');
+
+  const withBreaks = withoutBoilerplate
+    .replace(/<(?:br|hr)\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|tr|li|h[1-6]|blockquote|section|article|table)>/gi, '\n')
+    .replace(/<\/(?:td|th)>/gi, '\t')
+    .replace(/<[^>]+>/g, '');
+
+  const decoded = decodeHtmlEntities(withBreaks);
+  return decoded
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line, idx, arr) => line.length > 0 || (idx > 0 && arr[idx - 1].length > 0))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function detectSecSectionHeadings(plainText: string): string[] {
+  const seen = new Set<string>();
+  const headings: string[] = [];
+  for (const line of plainText.split('\n')) {
+    if (line.length < 4 || line.length > 120) continue;
+    if (/^(?:item\s+\d+(?:\.\d+[a-z]?)?\b|part\s+[ivx]+\b|signatures?\b)/i.test(line)) {
+      const normalized = line.replace(/\s+/g, ' ').trim();
+      const key = normalized.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        headings.push(normalized);
+        if (headings.length >= 25) break;
+      }
+    }
+  }
+  return headings;
+}
+
+function findSectionMatchIndex(plainText: string, query: string): { index: number; label: string } | null {
+  const escaped = query
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+  if (!escaped) return null;
+
+  const headingRegex = new RegExp(`^[^\\n]*${escaped}[^\\n]*$`, 'im');
+  const headingMatch = headingRegex.exec(plainText);
+  if (headingMatch) {
+    return { index: headingMatch.index, label: headingMatch[0].trim().slice(0, 120) };
+  }
+
+  const inlineRegex = new RegExp(escaped, 'i');
+  const inlineMatch = inlineRegex.exec(plainText);
+  if (inlineMatch) {
+    return { index: inlineMatch.index, label: query.trim() };
+  }
+  return null;
+}
+
+export async function getSecFilingExcerpt(
+  params: {
+    tickerOrCik: string;
+    accessionNumber?: string;
+    form?: string;
+    sectionOrQuery?: string;
+    maxChars?: number;
+  },
+  env: EdgarEnv,
+  fetchImpl: typeof fetch = fetch
+): Promise<SecFilingExcerptResult> {
+  const entry = await resolveExactCik(params.tickerOrCik, env, fetchImpl);
+  const subs = await fetchSecJson<SecSubmissionsJson>(
+    entry.submissionsUrl,
+    env,
+    ENTITY_TTL_MS,
+    fetchImpl
+  );
+
+  const recent = subs.filings?.recent;
+  if (!recent) {
+    throw new Error(`No recent filings payload found for CIK ${entry.cik}`);
+  }
+
+  let matchIdx = -1;
+  if (params.accessionNumber && params.accessionNumber.trim()) {
+    const targetAccn = params.accessionNumber.replace(/-/g, '').trim().toLowerCase();
+    matchIdx = recent.accessionNumber.findIndex(
+      (accn) => accn.replace(/-/g, '').toLowerCase() === targetAccn
+    );
+    if (matchIdx === -1) {
+      throw new Error(
+        `Accession number "${params.accessionNumber}" not found in recent filings for CIK ${entry.cik}`
+      );
+    }
+  } else {
+    const targetForm = (params.form ?? '8-K').trim().toUpperCase();
+    matchIdx = recent.form.findIndex((f) => (f ?? '').toUpperCase() === targetForm);
+    if (matchIdx === -1) {
+      matchIdx = recent.form.findIndex((f) => (f ?? '').toUpperCase().startsWith(`${targetForm}/`));
+    }
+    if (matchIdx === -1) {
+      throw new Error(`No recent "${targetForm}" filing found for CIK ${entry.cik}`);
+    }
+  }
+
+  const accessionNumber = recent.accessionNumber[matchIdx];
+  const form = recent.form[matchIdx] ?? '';
+  const primaryDocument = (recent.primaryDocument[matchIdx] ?? '').replace(/^xsl[^/]*\//i, '');
+  if (!primaryDocument) {
+    throw new Error(`Missing primaryDocument for accession ${accessionNumber}`);
+  }
+
+  const filingUrl = formatSecFilingUrl(entry.cikNumber, accessionNumber, primaryDocument);
+  const rawDocument = await fetchSecText(filingUrl, env, ENTITY_TTL_MS, fetchImpl);
+  const plainText = stripSecHtmlToText(rawDocument);
+  const detectedSections = detectSecSectionHeadings(plainText);
+
+  const maxChars = Math.max(500, Math.min(30_000, Math.floor(params.maxChars ?? 12_000)));
+  let startOffset = 0;
+  let matchedSection: string | null = null;
+
+  if (params.sectionOrQuery && params.sectionOrQuery.trim()) {
+    const match = findSectionMatchIndex(plainText, params.sectionOrQuery);
+    if (match) {
+      const lineStart = plainText.lastIndexOf('\n', match.index);
+      startOffset = lineStart >= 0 && match.index - lineStart < 200 ? lineStart + 1 : match.index;
+      matchedSection = match.label;
+    }
+  }
+
+  const excerpt = plainText.slice(startOffset, startOffset + maxChars);
+  const truncated = startOffset + excerpt.length < plainText.length;
+
+  return {
+    company: {
+      cik: entry.cik,
+      ticker: subs.tickers?.[0] ?? (entry.ticker || null),
+      name: subs.name || entry.title,
+    },
+    filing: {
+      accessionNumber,
+      form,
+      filingDate: recent.filingDate[matchIdx] ?? '',
+      reportDate: recent.reportDate[matchIdx] ?? '',
+      primaryDocument,
+      items: parseRecentItems(recent.items?.[matchIdx]),
+      filingUrl,
+    },
+    extraction: {
+      totalPlainChars: plainText.length,
+      returnedChars: excerpt.length,
+      truncated,
+      matchedSection,
+      detectedSections,
+      excerpt,
+    },
+    provenance: {
+      source: 'SEC EDGAR Primary Filing Document',
+      submissionsUrl: entry.submissionsUrl,
+      filingUrl,
+    },
   };
 }

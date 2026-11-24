@@ -26,7 +26,7 @@ Standalone **Pay-Per-Call MCP Server** built for **Cloudflare Workers** implemen
 
 | Tool | Price | Purpose |
 | :--- | :---: | :--- |
-| `list_models_pricing` | **FREE** | Discovery: 20 models with Nov-2026 pricing (incl. GPT-6.1 Terra, Gemini 4 Neon, Gemini 4 Hydrogen, Qwen4-Max & Kimi K3.1 Pro), AA Intelligence & SWE-bench scores |
+| `list_models_pricing` | **FREE** | Discovery: 24 models across 9 providers with Nov-2026 pricing (incl. MiniMax-M3, Grok 4.7, GLM-5.3 / 5.3-Flash, Kimi K3.1 Pro, Qwen4-Max, Gemini 4 Neon/Hydrogen & GPT-6.1 Terra), AA Intelligence & SWE-bench scores |
 | `recommend_pareto_route` | **$0.005 USDC** | Pareto-optimal model + Hybrid Planner/Worker routing for a workload & budget |
 | `simulate_agent_cost` | **$0.005 USDC** | Full $O(N^2)$ multi-turn loop simulation with caching, retries & long-context step-ups |
 | `audit_prompt_cache_tax` | **$0.010 USDC** | Audit `CLAUDE.md` / `AGENTS.md` / `mcp.json` for token tax, secrets & cache-busters |

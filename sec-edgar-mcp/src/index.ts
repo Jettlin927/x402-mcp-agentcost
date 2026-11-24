@@ -1,8 +1,11 @@
 import {
   comparePeers,
   getFinancialSnapshot,
+  getInsiderTrades,
   getRecentFilings,
+  getSecFilingExcerpt,
   resolveCompany,
+  searchSecFilings,
   type EdgarEnv,
 } from './edgar';
 import {
@@ -115,6 +118,76 @@ export const MCP_TOOLS: McpToolDef[] = [
       required: ['tickers'],
     },
   },
+  {
+    name: 'get_sec_insider_trades',
+    priceUsd: 0.01,
+    description:
+      '[x402: $0.010 USDC] Parse recent SEC Form 4 insider trading XML filings (CEO/CFO/Director/10% Owner buys & sells, Rule 10b5-1 flags, share prices, USD totals, and net open-market buy/sell summary).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tickerOrCik: { type: 'string', description: 'US ticker (e.g. NVDA) or 10-digit CIK' },
+        limit: { type: 'number', default: 5, description: 'Max recent Form 4 filings to parse (1-10)' },
+      },
+      required: ['tickerOrCik'],
+    },
+  },
+  {
+    name: 'search_sec_filings',
+    priceUsd: 0.008,
+    description:
+      '[x402: $0.008 USDC] Full-text search across SEC EDGAR filings via EFTS (10-K, 10-Q, 8-K, Form 4, etc.) with optional ticker/CIK, form, and date-range filters.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Full-text query, e.g. "\\"material weakness\\"" or "Blackwell"',
+        },
+        tickerOrCik: { type: 'string', description: 'Optional US ticker or CIK filter' },
+        forms: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional form filter, e.g. ["10-K", "10-Q", "8-K"]',
+        },
+        startDate: { type: 'string', description: 'Optional start date YYYY-MM-DD' },
+        endDate: { type: 'string', description: 'Optional end date YYYY-MM-DD' },
+        limit: { type: 'number', default: 10, description: 'Max hits to return (1-20)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_sec_filing_excerpt',
+    priceUsd: 0.012,
+    description:
+      '[x402: $0.012 USDC] Fetch and strip HTML/iXBRL boilerplate from an SEC 8-K, 10-K, or 10-Q filing, detect Item headings, and extract clean section/keyword text within a token-safe character budget.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tickerOrCik: { type: 'string', description: 'US ticker (e.g. AAPL) or 10-digit CIK' },
+        accessionNumber: {
+          type: 'string',
+          description: 'Optional exact accession number (e.g. 0001140361-26-042798); defaults to latest matching form',
+        },
+        form: {
+          type: 'string',
+          default: '8-K',
+          description: 'Form type when accessionNumber is omitted (e.g. 8-K, 10-K, 10-Q)',
+        },
+        sectionOrQuery: {
+          type: 'string',
+          description: 'Optional section heading or keyword to jump to (e.g. "Item 2.02", "Item 8.01", "Risk Factors")',
+        },
+        maxChars: {
+          type: 'number',
+          default: 12000,
+          description: 'Max plain-text characters to return (500-30000)',
+        },
+      },
+      required: ['tickerOrCik'],
+    },
+  },
 ];
 
 const TOOL_EXAMPLES: Record<
@@ -144,12 +217,39 @@ const TOOL_EXAMPLES: Record<
       peers: [{ ticker: 'AAPL', revenueUsd: 478834000000, operatingMarginPct: 31.2 }],
     },
   },
+  get_sec_insider_trades: {
+    input: { tickerOrCik: 'NVDA', limit: 5 },
+    output: {
+      company: { cik: '0001045810', ticker: 'NVDA', name: 'NVIDIA CORP' },
+      filingsScanned: 5,
+      summary: { totalTransactions: 4, netOpenMarketUsd: -1250000 },
+    },
+  },
+  search_sec_filings: {
+    input: { query: '"Blackwell"', tickerOrCik: 'NVDA', forms: ['10-K', '10-Q'], limit: 5 },
+    output: {
+      query: '"Blackwell"',
+      totalHits: 7,
+      hits: [{ form: '10-Q', fileDate: '2026-08-26', accessionNumber: '0001045810-26-000075' }],
+    },
+  },
+  get_sec_filing_excerpt: {
+    input: { tickerOrCik: 'AAPL', form: '8-K', sectionOrQuery: 'Item 8.01', maxChars: 8000 },
+    output: {
+      company: { cik: '0000320193', ticker: 'AAPL', name: 'Apple Inc.' },
+      filing: { form: '8-K', accessionNumber: '0001140361-26-042798' },
+      extraction: { matchedSection: 'Item 8.01 Other Events', returnedChars: 1420 },
+    },
+  },
 };
 
 const REST_TOOL_ROUTES: Record<string, string> = {
   '/api/sec-financial-snapshot': 'get_sec_financial_snapshot',
   '/api/sec-recent-filings': 'get_sec_recent_filings',
   '/api/compare-sec-peers': 'compare_sec_peers',
+  '/api/sec-insider-trades': 'get_sec_insider_trades',
+  '/api/sec-search-filings': 'search_sec_filings',
+  '/api/sec-filing-excerpt': 'get_sec_filing_excerpt',
 };
 
 function jsonRpcResult(
@@ -238,6 +338,50 @@ async function executeTool(
     return comparePeers({ tickers, periodType }, env, fetchImpl);
   }
 
+  if (name === 'get_sec_insider_trades') {
+    const tickerOrCik = typeof args.tickerOrCik === 'string' ? args.tickerOrCik : '';
+    if (!tickerOrCik.trim()) {
+      throw new Error('tickerOrCik is required');
+    }
+    const limit = typeof args.limit === 'number' ? args.limit : 5;
+    return getInsiderTrades({ tickerOrCik, limit }, env, fetchImpl);
+  }
+
+  if (name === 'search_sec_filings') {
+    const query = typeof args.query === 'string' ? args.query : '';
+    if (!query.trim()) {
+      throw new Error('query is required');
+    }
+    const tickerOrCik = typeof args.tickerOrCik === 'string' ? args.tickerOrCik : undefined;
+    const forms = Array.isArray(args.forms)
+      ? args.forms.filter((f): f is string => typeof f === 'string')
+      : undefined;
+    const startDate = typeof args.startDate === 'string' ? args.startDate : undefined;
+    const endDate = typeof args.endDate === 'string' ? args.endDate : undefined;
+    const limit = typeof args.limit === 'number' ? args.limit : 10;
+    return searchSecFilings(
+      { query, tickerOrCik, forms, startDate, endDate, limit },
+      env,
+      fetchImpl
+    );
+  }
+
+  if (name === 'get_sec_filing_excerpt') {
+    const tickerOrCik = typeof args.tickerOrCik === 'string' ? args.tickerOrCik : '';
+    if (!tickerOrCik.trim()) {
+      throw new Error('tickerOrCik is required');
+    }
+    const accessionNumber = typeof args.accessionNumber === 'string' ? args.accessionNumber : undefined;
+    const form = typeof args.form === 'string' ? args.form : undefined;
+    const sectionOrQuery = typeof args.sectionOrQuery === 'string' ? args.sectionOrQuery : undefined;
+    const maxChars = typeof args.maxChars === 'number' ? args.maxChars : undefined;
+    return getSecFilingExcerpt(
+      { tickerOrCik, accessionNumber, form, sectionOrQuery, maxChars },
+      env,
+      fetchImpl
+    );
+  }
+
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -277,6 +421,9 @@ export async function handleSecEdgarRequest(
 - POST ${url.origin}/api/sec-financial-snapshot ($0.010 USDC) — Audited US-GAAP XBRL metrics, margins, YoY growth, FCF & accession numbers
 - POST ${url.origin}/api/sec-recent-filings ($0.005 USDC) — Recent 10-K/10-Q/8-K/Form 4 filings with direct SEC Archives URLs
 - POST ${url.origin}/api/compare-sec-peers ($0.015 USDC) — Side-by-side financial comparison across 2–5 US tickers
+- POST ${url.origin}/api/sec-insider-trades ($0.010 USDC) — Parsed SEC Form 4 insider buys/sells, Rule 10b5-1 flags & USD totals
+- POST ${url.origin}/api/sec-search-filings ($0.008 USDC) — Full-text EFTS search across SEC EDGAR filings by keyword, ticker, form & date
+- POST ${url.origin}/api/sec-filing-excerpt ($0.012 USDC) — HTML/iXBRL-stripped clean text & targeted Item/section extraction for 8-K, 10-K & 10-Q filings
 
 ## Free Tools (via POST /mcp)
 - tools/list — List all tools and schemas

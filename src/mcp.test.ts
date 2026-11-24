@@ -70,12 +70,24 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     const allJson = (await allRes.json()) as {
       result: { structuredContent: { count: number; models: { id: string }[] } };
     };
-    expect(allJson.result.structuredContent.count).toBeGreaterThanOrEqual(20);
+    expect(allJson.result.structuredContent.count).toBeGreaterThanOrEqual(24);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gpt-6-1-terra')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-neon')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-hydrogen')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'qwen4-max')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'kimi-k3-1-pro')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'grok-4-7')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'glm-5-3')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'glm-5-3-flash')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'minimax-m3')).toBe(true);
+    const sonnet = allJson.result.structuredContent.models.find((m) => m.id === 'claude-sonnet-5-5') as
+      | { cachedInputPerM?: number }
+      | undefined;
+    const fable = allJson.result.structuredContent.models.find((m) => m.id === 'claude-fable-5-2') as
+      | { cachedInputPerM?: number }
+      | undefined;
+    expect(sonnet?.cachedInputPerM).toBe(0.1);
+    expect(fable?.cachedInputPerM).toBe(0.2);
   });
 
   it('returns HTTP 402 Payment Required with valid x402 v2 PAYMENT-REQUIRED header on unpaid paid tool', async () => {

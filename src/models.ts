@@ -1,4 +1,14 @@
-export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'qwen' | 'moonshot' | 'custom';
+export type ProviderId =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'deepseek'
+  | 'qwen'
+  | 'moonshot'
+  | 'xai'
+  | 'zai'
+  | 'minimax'
+  | 'custom';
 export type ModelTier = 'frontier' | 'balanced' | 'economy';
 
 export interface LLMModel {
@@ -41,7 +51,7 @@ export const MODELS: LLMModel[] = [
     providerLabel: 'Anthropic',
     tier: 'balanced',
     inputPerM: 2.0,
-    cachedInputPerM: 0.2,
+    cachedInputPerM: 0.1,
     cacheWriteMultiplier: 1.25,
     outputPerM: 10.0,
     contextWindow: 1_000_000,
@@ -50,8 +60,8 @@ export const MODELS: LLMModel[] = [
     intelligenceIndex: 56,
     sweBenchPct: 80.8,
     speedTokPerSec: 92,
-    note: 'Default workhorse for coding & MCP tool-calling agents',
-    noteZh: '编程与 MCP 工具调用 Agent 的主力均衡模型',
+    note: 'Default workhorse for coding & MCP tool-calling agents (95% cache discount, $0.10/M)',
+    noteZh: '编程与 MCP 工具调用 Agent 的主力均衡模型（缓存读 $0.10/M，省 95%）',
   },
   {
     id: 'claude-opus-5-5',
@@ -60,7 +70,7 @@ export const MODELS: LLMModel[] = [
     providerLabel: 'Anthropic',
     tier: 'frontier',
     inputPerM: 4.0,
-    cachedInputPerM: 0.4,
+    cachedInputPerM: 0.2,
     cacheWriteMultiplier: 1.25,
     outputPerM: 20.0,
     contextWindow: 1_000_000,
@@ -69,8 +79,8 @@ export const MODELS: LLMModel[] = [
     intelligenceIndex: 59,
     sweBenchPct: 85.2,
     speedTokPerSec: 58,
-    note: 'Top-tier architectural reasoning & complex multi-file refactors',
-    noteZh: '顶级架构推理与复杂跨文件重构模型',
+    note: 'Top-tier architectural reasoning & complex multi-file refactors (95% cache discount, $0.20/M)',
+    noteZh: '顶级架构推理与复杂跨文件重构模型（缓存读 $0.20/M，省 95%）',
   },
   {
     id: 'claude-fable-5-2',
@@ -79,15 +89,15 @@ export const MODELS: LLMModel[] = [
     providerLabel: 'Anthropic',
     tier: 'frontier',
     inputPerM: 8.0,
-    cachedInputPerM: 0.4,
+    cachedInputPerM: 0.2,
     cacheWriteMultiplier: 1.25,
     outputPerM: 40.0,
     contextWindow: 1_000_000,
     intelligenceIndex: 65,
     sweBenchPct: 86.4,
     speedTokPerSec: 44,
-    note: 'Ultra-frontier reasoning tier with 95% cache read discount',
-    noteZh: '超旗舰深度推理档位，缓存命中最高省 95%',
+    note: 'Ultra-frontier reasoning tier with 97.5% cache read discount ($0.20/M)',
+    noteZh: '超旗舰深度推理档位，缓存命中最高省 97.5% ($0.20/M)',
   },
   {
     id: 'claude-haiku-5-5',
@@ -101,12 +111,12 @@ export const MODELS: LLMModel[] = [
     outputPerM: 0.5,
     contextWindow: 200_000,
     longContextThreshold: 100_000,
-    longContextMultiplier: 1.5,
+    longContextMultiplier: 5.0,
     intelligenceIndex: 44,
     sweBenchPct: 66.4,
     speedTokPerSec: 175,
-    note: 'Ultra-fast worker model for high-volume sub-agent loops',
-    noteZh: '极速低价执行模型，适合高频子 Agent 循环',
+    note: 'Ultra-fast worker model for high-volume sub-agent loops (5x >100k ctx)',
+    noteZh: '极速低价执行模型，适合高频子 Agent 循环（>100k 上下文 5x 计费）',
   },
 
   // OpenAI
@@ -396,6 +406,87 @@ export const MODELS: LLMModel[] = [
     speedTokPerSec: 73,
     note: 'Apache 2.0 2.8T MoE open-weight frontier: 90% cache discount, AA Index 55, Terminal-Bench 4.0 67.0%',
     noteZh: 'Apache 2.0 2.8T MoE 开源旗舰：90% 缓存折扣，AA 智商 55，Terminal-Bench 4.0 达 67.0%',
+  },
+
+  // xAI
+  {
+    id: 'grok-4-7',
+    name: 'Grok 4.7',
+    provider: 'xai',
+    providerLabel: 'xAI',
+    tier: 'frontier',
+    inputPerM: 2.0,
+    cachedInputPerM: 0.5,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 6.0,
+    contextWindow: 500_000,
+    longContextThreshold: 200_000,
+    longContextMultiplier: 2.0,
+    intelligenceIndex: 46,
+    // SWE-bench Verified N/A; uses published DeepSWE v1.1 pass rate (71.0%)
+    sweBenchPct: 71.0,
+    speedTokPerSec: 60,
+    note: '500k ctx (2x >=200k): $2/$6, $0.50 cached, AA Coding Agent 56, DeepSWE v1.1 71.0%',
+    noteZh: '500k 上下文 (>=200k 翻倍)：$2/$6，缓存 $0.50，AA Coding Agent 56，DeepSWE v1.1 达 71.0%',
+  },
+
+  // Z.ai (Zhipu AI)
+  {
+    id: 'glm-5-3',
+    name: 'GLM-5.3',
+    provider: 'zai',
+    providerLabel: 'Z.ai',
+    tier: 'balanced',
+    inputPerM: 1.4,
+    cachedInputPerM: 0.26,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 4.4,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 32,
+    // SWE-bench Verified N/A; uses published DeepSWE v1.1 pass rate (66.9%)
+    sweBenchPct: 66.9,
+    speedTokPerSec: 115,
+    note: '1M ctx: $1.40/$4.40, $0.26 cached, DeepSWE v1.1 66.9% (GLM-5.4 API pricing pending)',
+    noteZh: '1M 上下文：$1.40/$4.40，缓存 $0.26，DeepSWE v1.1 达 66.9%（GLM-5.4 API 价格待公布）',
+  },
+  {
+    id: 'glm-5-3-flash',
+    name: 'GLM-5.3-Flash',
+    provider: 'zai',
+    providerLabel: 'Z.ai',
+    tier: 'economy',
+    inputPerM: 0.15,
+    cachedInputPerM: 0.03,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 0.5,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 57,
+    // SWE-bench Verified N/A; uses published DeepSWE v1.1 pass rate (63.4%)
+    sweBenchPct: 63.4,
+    speedTokPerSec: 49,
+    note: '1M ctx, 320B-A18B MoE: $0.15/$0.50, $0.03 cached, AA Index 57, DeepSWE v1.1 63.4%',
+    noteZh: '1M 上下文，320B-A18B MoE：$0.15/$0.50，缓存 $0.03，AA 智商 57，DeepSWE v1.1 达 63.4%',
+  },
+
+  // MiniMax
+  {
+    id: 'minimax-m3',
+    name: 'MiniMax-M3',
+    provider: 'minimax',
+    providerLabel: 'MiniMax',
+    tier: 'balanced',
+    inputPerM: 0.3,
+    cachedInputPerM: 0.06,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 1.2,
+    contextWindow: 1_000_000,
+    longContextThreshold: 512_000,
+    longContextMultiplier: 2.0,
+    intelligenceIndex: 55,
+    sweBenchPct: 80.5,
+    speedTokPerSec: 115,
+    note: '1M ctx (2x >512k): $0.30/$1.20, $0.06 cached, AA Index 55, SWE-bench 80.5%',
+    noteZh: '1M 上下文 (>512k 翻倍)：$0.30/$1.20，缓存 $0.06，AA 智商 55，SWE-bench 达 80.5%',
   },
 ];
 
