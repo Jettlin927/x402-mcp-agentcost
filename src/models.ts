@@ -8,6 +8,7 @@ export type ProviderId =
   | 'xai'
   | 'zai'
   | 'minimax'
+  | 'mistral'
   | 'custom';
 export type ModelTier = 'frontier' | 'balanced' | 'economy';
 
@@ -218,15 +219,15 @@ export const MODELS: LLMModel[] = [
     providerLabel: 'Google',
     tier: 'frontier',
     inputPerM: 2.0,
-    cachedInputPerM: 0.2,
+    cachedInputPerM: 0.1,
     cacheWriteMultiplier: 1.0,
     outputPerM: 10.0,
     contextWindow: 2_000_000,
     intelligenceIndex: 60,
     sweBenchPct: 82.5,
     speedTokPerSec: 84,
-    note: '2M context frontier model (scheduled $2/$10 -> $4/$20 price hike on Dec 1, 2026)',
-    noteZh: '200 万上下文旗舰模型（将于 2026-12-01 从 $2/$10 涨价至 $4/$20）',
+    note: '2M context frontier model ($0.10/M cached, 95% off; scheduled $2/$10 -> $4/$20 hike on Dec 1, 2026)',
+    noteZh: '200 万上下文旗舰模型（缓存 $0.10/M 省 95%，将于 2026-12-01 从 $2/$10 涨价至 $4/$20）',
   },
   {
     id: 'gemini-4-argon',
@@ -234,16 +235,16 @@ export const MODELS: LLMModel[] = [
     provider: 'google',
     providerLabel: 'Google',
     tier: 'balanced',
-    inputPerM: 1.5,
-    cachedInputPerM: 0.15,
+    inputPerM: 2.0,
+    cachedInputPerM: 0.1,
     cacheWriteMultiplier: 1.0,
-    outputPerM: 7.5,
+    outputPerM: 10.0,
     contextWindow: 2_000_000,
     intelligenceIndex: 54,
     sweBenchPct: 77.4,
     speedTokPerSec: 108,
-    note: 'Balanced long-context model for repo-wide analysis',
-    noteZh: '均衡长上下文模型，适合全仓库代码分析',
+    note: '2M long-context model ($0.10/M cached, 95% off; scheduled $2/$10 -> $4/$20 hike on Dec 1, 2026)',
+    noteZh: '200 万长上下文模型（缓存 $0.10/M 省 95%，将于 2026-12-01 从 $2/$10 涨价至 $4/$20）',
   },
   {
     id: 'gemini-4-hydrogen',
@@ -277,8 +278,8 @@ export const MODELS: LLMModel[] = [
     intelligenceIndex: 48,
     sweBenchPct: 71.5,
     speedTokPerSec: 155,
-    note: 'Fast agentic execution with strong multimodal & tool accuracy',
-    noteZh: '高速 Agent 执行模型，多模态与工具调用表现稳定',
+    note: 'Fast agentic execution ($0.75/$3.75 promo through Dec 31, 2026; $1.50/$7.50 Jan 1, 2027)',
+    noteZh: '高速 Agent 执行模型（优惠价 $0.75/$3.75 至 2026-12-31，2027-01-01 起 $1.50/$7.50）',
   },
   {
     id: 'gemini-3-5-flash-lite',
@@ -487,6 +488,44 @@ export const MODELS: LLMModel[] = [
     speedTokPerSec: 115,
     note: '1M ctx (2x >512k): $0.30/$1.20, $0.06 cached, AA Index 55, SWE-bench 80.5%',
     noteZh: '1M 上下文 (>512k 翻倍)：$0.30/$1.20，缓存 $0.06，AA 智商 55，SWE-bench 达 80.5%',
+  },
+
+  // Mistral AI
+  {
+    id: 'mistral-large-4',
+    name: 'Mistral Large 4',
+    provider: 'mistral',
+    providerLabel: 'Mistral AI',
+    tier: 'balanced',
+    inputPerM: 0.7,
+    cachedInputPerM: 0.07,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 2.1,
+    contextWindow: 1_000_000,
+    intelligenceIndex: 26,
+    // SWE-bench Verified N/A; uses published DeepSWE v1.1 pass rate (61.7%)
+    sweBenchPct: 61.7,
+    speedTokPerSec: 116,
+    note: '1M ctx, 1.05T-A52B open-weight MoE: $0.70/$2.10 ($0.07 cached; $1.36/$4.18 list), AA Index 26, Coding Agent 48%, DeepSWE v1.1 61.7%',
+    noteZh: '1M 上下文，1.05T-A52B 开源 MoE：$0.70/$2.10（缓存 $0.07；原价 $1.36/$4.18），AA 智商 26，Coding Agent 48%，DeepSWE v1.1 61.7%',
+  },
+  {
+    id: 'mistral-small-4',
+    name: 'Mistral Small 4',
+    provider: 'mistral',
+    providerLabel: 'Mistral AI',
+    tier: 'economy',
+    inputPerM: 0.15,
+    cachedInputPerM: 0.015,
+    cacheWriteMultiplier: 1.0,
+    outputPerM: 0.6,
+    contextWindow: 256_000,
+    intelligenceIndex: 12,
+    // SWE-bench Verified N/A; uses published Terminal-Bench Hard pass rate (17.4%)
+    sweBenchPct: 17.4,
+    speedTokPerSec: 150,
+    note: '256k ctx, 119B-A6.5B MoE: $0.15/$0.60 ($0.015 cached), 150 tok/s, Terminal-Bench Hard 17.4%',
+    noteZh: '256k 上下文，119B-A6.5B MoE：$0.15/$0.60（缓存 $0.015），150 tok/s，Terminal-Bench Hard 17.4%',
   },
 ];
 

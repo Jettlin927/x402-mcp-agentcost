@@ -192,6 +192,50 @@ export interface SecFilingExcerptResult {
   };
 }
 
+export interface Sec13fHolding {
+  nameOfIssuer: string;
+  titleOfClass: string;
+  cusip: string;
+  valueUsd: number;
+  shares: number;
+  amountType: string;
+  putCall: 'PUT' | 'CALL' | null;
+  weightPct: number;
+  impliedPriceUsd: number | null;
+  investmentDiscretion: string | null;
+  votingSole: number;
+  votingShared: number;
+  votingNone: number;
+  lineItemsCount: number;
+}
+
+export interface Sec13fHoldingsReport {
+  manager: {
+    cik: string;
+    name: string;
+  };
+  filing: {
+    accessionNumber: string;
+    form: string;
+    filingDate: string;
+    reportDate: string;
+    infoTableUrl: string;
+  };
+  summary: {
+    totalValueUsd: number;
+    totalLineItems: number;
+    uniquePositions: number;
+    matchedPositions: number;
+    returnedPositions: number;
+  };
+  holdings: Sec13fHolding[];
+  provenance: {
+    source: 'SEC EDGAR Form 13F Information Table XML';
+    submissionsUrl: string;
+    infoTableUrl: string;
+  };
+}
+
 export interface FinancialSnapshot {
   company: {
     cik: string;
@@ -815,14 +859,16 @@ function decodeXmlEntities(raw: string): string {
 }
 
 function extractTagBlock(xml: string, tag: string): string | null {
-  const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'i'));
+  const match = xml.match(
+    new RegExp(`<(?:[a-z0-9_-]+:)?${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[a-z0-9_-]+:)?${tag}>`, 'i')
+  );
   return match ? match[1] : null;
 }
 
 function extractTagValue(xml: string, tag: string): string | null {
   const block = extractTagBlock(xml, tag);
   if (block === null) return null;
-  const nestedVal = block.match(/<value(?:\s[^>]*)?>([\s\S]*?)<\/value>/i);
+  const nestedVal = block.match(/<(?:[a-z0-9_-]+:)?value(?:\s[^>]*)?>([\s\S]*?)<\/(?:[a-z0-9_-]+:)?value>/i);
   const raw = nestedVal ? nestedVal[1] : block;
   const clean = decodeXmlEntities(raw.replace(/<[^>]+>/g, ''));
   return clean.length > 0 ? clean : null;
@@ -1278,6 +1324,304 @@ export async function getSecFilingExcerpt(
       source: 'SEC EDGAR Primary Filing Document',
       submissionsUrl: entry.submissionsUrl,
       filingUrl,
+    },
+  };
+}
+
+interface Raw13fRow {
+  nameOfIssuer: string;
+  titleOfClass: string;
+  cusip: string;
+  valueUsd: number;
+  shares: number;
+  amountType: string;
+  putCall: 'PUT' | 'CALL' | null;
+  investmentDiscretion: string | null;
+  votingSole: number;
+  votingShared: number;
+  votingNone: number;
+}
+
+export function parse13fInfoTableXml(xml: string): Raw13fRow[] {
+  const blocks = Array.from(
+    xml.matchAll(/<(?:[a-z0-9_-]+:)?infoTable(?:\s[^>]*)?>([\s\S]*?)<\/(?:[a-z0-9_-]+:)?infoTable>/gi)
+  );
+  const rows: Raw13fRow[] = [];
+
+  for (const match of blocks) {
+    const block = match[1];
+    const nameOfIssuer = extractTagValue(block, 'nameOfIssuer');
+    const cusip = (extractTagValue(block, 'cusip') ?? '').toUpperCase();
+    const valueUsd = parseXmlNumber(extractTagValue(block, 'value'));
+    const shares = parseXmlNumber(extractTagValue(block, 'sshPrnamt'));
+    if (!nameOfIssuer || !cusip || valueUsd === null || shares === null) continue;
+
+    const putCallRaw = (extractTagValue(block, 'putCall') ?? '').toUpperCase();
+    const putCall = putCallRaw === 'PUT' || putCallRaw === 'CALL' ? putCallRaw : null;
+
+    rows.push({
+      nameOfIssuer,
+      titleOfClass: extractTagValue(block, 'titleOfClass') ?? 'COM',
+      cusip,
+      valueUsd,
+      shares,
+      amountType: (extractTagValue(block, 'sshPrnamtType') ?? 'SH').toUpperCase(),
+      putCall,
+      investmentDiscretion: extractTagValue(block, 'investmentDiscretion'),
+      votingSole: parseXmlNumber(extractTagValue(block, 'Sole')) ?? 0,
+      votingShared: parseXmlNumber(extractTagValue(block, 'Shared')) ?? 0,
+      votingNone: parseXmlNumber(extractTagValue(block, 'None')) ?? 0,
+    });
+  }
+
+  return rows;
+}
+
+function consolidate13fRows(rows: Raw13fRow[]): {
+  totalValueUsd: number;
+  holdings: Sec13fHolding[];
+} {
+  const grouped = new Map<string, Sec13fHolding>();
+  let totalValueUsd = 0;
+
+  for (const row of rows) {
+    totalValueUsd += row.valueUsd;
+    const key = `${row.cusip}|${row.putCall ?? 'EQUITY'}|${row.amountType}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.valueUsd += row.valueUsd;
+      existing.shares += row.shares;
+      existing.votingSole += row.votingSole;
+      existing.votingShared += row.votingShared;
+      existing.votingNone += row.votingNone;
+      existing.lineItemsCount += 1;
+    } else {
+      grouped.set(key, {
+        nameOfIssuer: row.nameOfIssuer,
+        titleOfClass: row.titleOfClass,
+        cusip: row.cusip,
+        valueUsd: row.valueUsd,
+        shares: row.shares,
+        amountType: row.amountType,
+        putCall: row.putCall,
+        weightPct: 0,
+        impliedPriceUsd: null,
+        investmentDiscretion: row.investmentDiscretion,
+        votingSole: row.votingSole,
+        votingShared: row.votingShared,
+        votingNone: row.votingNone,
+        lineItemsCount: 1,
+      });
+    }
+  }
+
+  const holdings = Array.from(grouped.values()).map((h) => ({
+    ...h,
+    weightPct: totalValueUsd > 0 ? Math.round((h.valueUsd / totalValueUsd) * 10_000) / 100 : 0,
+    impliedPriceUsd: h.shares > 0 ? Math.round((h.valueUsd / h.shares) * 100) / 100 : null,
+  }));
+
+  holdings.sort((a, b) => b.valueUsd - a.valueUsd);
+  return { totalValueUsd, holdings };
+}
+
+async function resolve13fManagerCik(
+  managerOrCik: string,
+  env: EdgarEnv,
+  fetchImpl: typeof fetch
+): Promise<{ cik: string; cikNumber: number; name: string; submissionsUrl: string }> {
+  const trimmed = managerOrCik.trim();
+  if (!trimmed) {
+    throw new Error('managerOrCik is required');
+  }
+
+  if (/^\d{1,10}$/.test(trimmed)) {
+    const cik = padCik(trimmed);
+    const cikNumber = Number.parseInt(cik, 10);
+    return {
+      cik,
+      cikNumber,
+      name: `CIK ${cik}`,
+      submissionsUrl: `https://data.sec.gov/submissions/CIK${cik}.json`,
+    };
+  }
+
+  const resolved = await resolveCompany(trimmed, env, fetchImpl, 3);
+  if (resolved.exact) {
+    return {
+      cik: resolved.exact.cik,
+      cikNumber: resolved.exact.cikNumber,
+      name: resolved.exact.title,
+      submissionsUrl: resolved.exact.submissionsUrl,
+    };
+  }
+
+  // Many 13F institutional managers (hedge funds / asset managers) are not public equity tickers,
+  // so fall back to SEC EFTS entity search filtered to Form 13F-HR.
+  const eftsUrl = `https://efts.sec.gov/LATEST/search-index?forms=13F-HR&entityName=${encodeURIComponent(trimmed)}`;
+  const efts = await fetchSecJson<{
+    hits?: {
+      hits?: Array<{
+        _source?: { ciks?: string[]; display_names?: string[] };
+      }>;
+    };
+  }>(eftsUrl, env, ENTITY_TTL_MS, fetchImpl);
+
+  const firstHit = efts.hits?.hits?.find((h) => (h._source?.ciks?.length ?? 0) > 0);
+  const rawCik = firstHit?._source?.ciks?.[0];
+  if (rawCik) {
+    const cik = padCik(rawCik);
+    const cikNumber = Number.parseInt(cik, 10);
+    const displayName = firstHit?._source?.display_names?.[0]?.replace(/\s*\(CIK\s+\d+\)\s*$/i, '').trim();
+    return {
+      cik,
+      cikNumber,
+      name: displayName || trimmed,
+      submissionsUrl: `https://data.sec.gov/submissions/CIK${cik}.json`,
+    };
+  }
+
+  if (resolved.matches.length > 0) {
+    const m = resolved.matches[0];
+    return {
+      cik: m.cik,
+      cikNumber: m.cikNumber,
+      name: m.title,
+      submissionsUrl: m.submissionsUrl,
+    };
+  }
+
+  throw new Error(`Could not resolve SEC 13F manager for "${managerOrCik}"`);
+}
+
+interface SecArchiveIndexJson {
+  directory?: {
+    item?: Array<{ name?: string; type?: string }>;
+  };
+}
+
+export async function get13fHoldings(
+  params: {
+    managerOrCik: string;
+    accessionNumber?: string;
+    issuerQuery?: string;
+    limit?: number;
+  },
+  env: EdgarEnv,
+  fetchImpl: typeof fetch = fetch
+): Promise<Sec13fHoldingsReport> {
+  const manager = await resolve13fManagerCik(params.managerOrCik, env, fetchImpl);
+  const subs = await fetchSecJson<SecSubmissionsJson>(
+    manager.submissionsUrl,
+    env,
+    ENTITY_TTL_MS,
+    fetchImpl
+  );
+
+  const recent = subs.filings?.recent;
+  if (!recent) {
+    throw new Error(`No recent filings payload found for CIK ${manager.cik}`);
+  }
+
+  let matchIdx = -1;
+  if (params.accessionNumber && params.accessionNumber.trim()) {
+    const targetAccn = params.accessionNumber.replace(/-/g, '').trim().toLowerCase();
+    matchIdx = recent.accessionNumber.findIndex(
+      (accn) => accn.replace(/-/g, '').toLowerCase() === targetAccn
+    );
+    if (matchIdx === -1) {
+      throw new Error(
+        `Accession number "${params.accessionNumber}" not found in recent filings for CIK ${manager.cik}`
+      );
+    }
+  } else {
+    matchIdx = recent.form.findIndex((f) => {
+      const upper = (f ?? '').toUpperCase();
+      return upper === '13F-HR' || upper === '13F-HR/A';
+    });
+    if (matchIdx === -1) {
+      throw new Error(`No recent 13F-HR filing found for CIK ${manager.cik}`);
+    }
+  }
+
+  const accessionNumber = recent.accessionNumber[matchIdx];
+  const accnNoDashes = accessionNumber.replace(/-/g, '');
+  const baseDirUrl = `https://www.sec.gov/Archives/edgar/data/${manager.cikNumber}/${accnNoDashes}`;
+  const indexJson = await fetchSecJson<SecArchiveIndexJson>(
+    `${baseDirUrl}/index.json`,
+    env,
+    ENTITY_TTL_MS,
+    fetchImpl
+  );
+
+  const xmlCandidates = (indexJson.directory?.item ?? [])
+    .map((item) => item.name ?? '')
+    .filter((name) => {
+      const lower = name.toLowerCase();
+      return lower.endsWith('.xml') && lower !== 'primary_doc.xml';
+    })
+    .sort((a, b) => {
+      const aInfo = a.toLowerCase().includes('info') ? 0 : 1;
+      const bInfo = b.toLowerCase().includes('info') ? 0 : 1;
+      return aInfo - bInfo;
+    });
+
+  let infoTableUrl = '';
+  let rawRows: Raw13fRow[] = [];
+  for (const filename of xmlCandidates) {
+    const candidateUrl = `${baseDirUrl}/${filename}`;
+    try {
+      const xml = await fetchSecText(candidateUrl, env, ENTITY_TTL_MS, fetchImpl);
+      if (/<(?:[a-z0-9_-]+:)?infoTable(?:\s|>)/i.test(xml)) {
+        rawRows = parse13fInfoTableXml(xml);
+        infoTableUrl = candidateUrl;
+        if (rawRows.length > 0) break;
+      }
+    } catch {
+      // Try next XML artifact in the accession directory.
+    }
+  }
+
+  if (!infoTableUrl || rawRows.length === 0) {
+    throw new Error(`No 13F-HR informationTable XML found in accession ${accessionNumber}`);
+  }
+
+  const consolidated = consolidate13fRows(rawRows);
+  const query = params.issuerQuery?.trim().toLowerCase() ?? '';
+  const filtered = query
+    ? consolidated.holdings.filter(
+        (h) =>
+          h.nameOfIssuer.toLowerCase().includes(query) || h.cusip.toLowerCase().includes(query)
+      )
+    : consolidated.holdings;
+
+  const limit = Math.max(1, Math.min(100, Math.floor(params.limit ?? 25)));
+  const returned = filtered.slice(0, limit);
+
+  return {
+    manager: {
+      cik: manager.cik,
+      name: subs.name || manager.name,
+    },
+    filing: {
+      accessionNumber,
+      form: recent.form[matchIdx] ?? '13F-HR',
+      filingDate: recent.filingDate[matchIdx] ?? '',
+      reportDate: recent.reportDate[matchIdx] ?? '',
+      infoTableUrl,
+    },
+    summary: {
+      totalValueUsd: consolidated.totalValueUsd,
+      totalLineItems: rawRows.length,
+      uniquePositions: consolidated.holdings.length,
+      matchedPositions: filtered.length,
+      returnedPositions: returned.length,
+    },
+    holdings: returned,
+    provenance: {
+      source: 'SEC EDGAR Form 13F Information Table XML',
+      submissionsUrl: manager.submissionsUrl,
+      infoTableUrl,
     },
   };
 }

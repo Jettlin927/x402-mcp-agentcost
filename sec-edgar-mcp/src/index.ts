@@ -1,5 +1,6 @@
 import {
   comparePeers,
+  get13fHoldings,
   getFinancialSnapshot,
   getInsiderTrades,
   getRecentFilings,
@@ -188,6 +189,35 @@ export const MCP_TOOLS: McpToolDef[] = [
       required: ['tickerOrCik'],
     },
   },
+  {
+    name: 'get_sec_13f_holdings',
+    priceUsd: 0.012,
+    description:
+      '[x402: $0.012 USDC] Parse an institutional investment manager Form 13F-HR Information Table XML (e.g. Berkshire Hathaway, Bridgewater, Citadel, or 10-digit CIK), consolidating sub-account CUSIPs into portfolio weights, USD values, shares, and PUT/CALL flags.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        managerOrCik: {
+          type: 'string',
+          description: 'Institutional manager name (e.g. "Berkshire Hathaway", "Bridgewater Associates"), ticker (e.g. BRK-B), or 10-digit CIK (e.g. 0001067983)',
+        },
+        accessionNumber: {
+          type: 'string',
+          description: 'Optional exact 13F-HR accession number; defaults to latest 13F-HR filing',
+        },
+        issuerQuery: {
+          type: 'string',
+          description: 'Optional issuer name or CUSIP substring filter (e.g. "APPLE" or "037833100")',
+        },
+        limit: {
+          type: 'number',
+          default: 25,
+          description: 'Max consolidated holdings to return sorted by USD value desc (1-100)',
+        },
+      },
+      required: ['managerOrCik'],
+    },
+  },
 ];
 
 const TOOL_EXAMPLES: Record<
@@ -241,6 +271,14 @@ const TOOL_EXAMPLES: Record<
       extraction: { matchedSection: 'Item 8.01 Other Events', returnedChars: 1420 },
     },
   },
+  get_sec_13f_holdings: {
+    input: { managerOrCik: '0001067983', limit: 10 },
+    output: {
+      manager: { cik: '0001067983', name: 'BERKSHIRE HATHAWAY INC' },
+      filing: { form: '13F-HR', reportDate: '2026-09-30', accessionNumber: '0001193125-26-463399' },
+      summary: { totalValueUsd: 285000000000, uniquePositions: 41 },
+    },
+  },
 };
 
 const REST_TOOL_ROUTES: Record<string, string> = {
@@ -250,6 +288,7 @@ const REST_TOOL_ROUTES: Record<string, string> = {
   '/api/sec-insider-trades': 'get_sec_insider_trades',
   '/api/sec-search-filings': 'search_sec_filings',
   '/api/sec-filing-excerpt': 'get_sec_filing_excerpt',
+  '/api/sec-13f-holdings': 'get_sec_13f_holdings',
 };
 
 function jsonRpcResult(
@@ -382,6 +421,21 @@ async function executeTool(
     );
   }
 
+  if (name === 'get_sec_13f_holdings') {
+    const managerOrCik = typeof args.managerOrCik === 'string' ? args.managerOrCik : '';
+    if (!managerOrCik.trim()) {
+      throw new Error('managerOrCik is required');
+    }
+    const accessionNumber = typeof args.accessionNumber === 'string' ? args.accessionNumber : undefined;
+    const issuerQuery = typeof args.issuerQuery === 'string' ? args.issuerQuery : undefined;
+    const limit = typeof args.limit === 'number' ? args.limit : 25;
+    return get13fHoldings(
+      { managerOrCik, accessionNumber, issuerQuery, limit },
+      env,
+      fetchImpl
+    );
+  }
+
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -424,6 +478,7 @@ export async function handleSecEdgarRequest(
 - POST ${url.origin}/api/sec-insider-trades ($0.010 USDC) — Parsed SEC Form 4 insider buys/sells, Rule 10b5-1 flags & USD totals
 - POST ${url.origin}/api/sec-search-filings ($0.008 USDC) — Full-text EFTS search across SEC EDGAR filings by keyword, ticker, form & date
 - POST ${url.origin}/api/sec-filing-excerpt ($0.012 USDC) — HTML/iXBRL-stripped clean text & targeted Item/section extraction for 8-K, 10-K & 10-Q filings
+- POST ${url.origin}/api/sec-13f-holdings ($0.012 USDC) — Institutional Form 13F-HR holdings XML parser with consolidated CUSIP weights, USD values & PUT/CALL breakdown
 
 ## Free Tools (via POST /mcp)
 - tools/list — List all tools and schemas

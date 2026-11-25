@@ -13,6 +13,7 @@ Pay-per-call **x402 v2** MCP & REST API on **Cloudflare Workers** providing zero
 | `get_sec_insider_trades` (`POST /api/sec-insider-trades`) | **$0.010 USDC** | Parse recent SEC Form 4 ownership XML filings into structured insider buys/sells, Rule 10b5-1 flags, USD values, and net open-market totals |
 | `search_sec_filings` (`POST /api/sec-search-filings`) | **$0.008 USDC** | Full-text search across SEC EDGAR filings via EFTS with optional ticker/CIK, form, and date-range filters |
 | `get_sec_filing_excerpt` (`POST /api/sec-filing-excerpt`) | **$0.012 USDC** | Fetch and strip HTML/iXBRL boilerplate from an SEC `8-K`, `10-K`, or `10-Q`, detect section headings, and return clean targeted text within a token-safe cap |
+| `get_sec_13f_holdings` (`POST /api/sec-13f-holdings`) | **$0.012 USDC** | Parse an institutional manager's Form `13F-HR` Information Table XML, consolidating sub-account CUSIPs into portfolio weights, USD values, shares, and PUT/CALL flags |
 
 ## Discovery Endpoints
 

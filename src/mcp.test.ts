@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { handleMcpRequest, type WorkerEnv } from './index';
-import { decodeBase64Json, type X402ChallengePayload } from './x402';
+import { decodeBase64Json, encodeBase64Json, type X402ChallengePayload } from './x402';
 
 const baseEnv: WorkerEnv = {
   X402_PAY_TO: '0x1111111111111111111111111111111111111111',
@@ -70,7 +70,7 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     const allJson = (await allRes.json()) as {
       result: { structuredContent: { count: number; models: { id: string }[] } };
     };
-    expect(allJson.result.structuredContent.count).toBeGreaterThanOrEqual(24);
+    expect(allJson.result.structuredContent.count).toBeGreaterThanOrEqual(26);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gpt-6-1-terra')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-neon')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'gemini-4-hydrogen')).toBe(true);
@@ -80,14 +80,26 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'glm-5-3')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'glm-5-3-flash')).toBe(true);
     expect(allJson.result.structuredContent.models.some((m) => m.id === 'minimax-m3')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'mistral-large-4')).toBe(true);
+    expect(allJson.result.structuredContent.models.some((m) => m.id === 'mistral-small-4')).toBe(true);
     const sonnet = allJson.result.structuredContent.models.find((m) => m.id === 'claude-sonnet-5-5') as
       | { cachedInputPerM?: number }
       | undefined;
     const fable = allJson.result.structuredContent.models.find((m) => m.id === 'claude-fable-5-2') as
       | { cachedInputPerM?: number }
       | undefined;
+    const argon = allJson.result.structuredContent.models.find((m) => m.id === 'gemini-4-argon') as
+      | { inputPerM?: number; cachedInputPerM?: number; outputPerM?: number }
+      | undefined;
+    const carbon = allJson.result.structuredContent.models.find((m) => m.id === 'gemini-4-carbon') as
+      | { cachedInputPerM?: number }
+      | undefined;
     expect(sonnet?.cachedInputPerM).toBe(0.1);
     expect(fable?.cachedInputPerM).toBe(0.2);
+    expect(argon?.inputPerM).toBe(2.0);
+    expect(argon?.cachedInputPerM).toBe(0.1);
+    expect(argon?.outputPerM).toBe(10.0);
+    expect(carbon?.cachedInputPerM).toBe(0.1);
   });
 
   it('returns HTTP 402 Payment Required with valid x402 v2 PAYMENT-REQUIRED header on unpaid paid tool', async () => {
@@ -115,7 +127,7 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     expect(decoded.accepts[0].payTo).toBe('0x1111111111111111111111111111111111111111');
   });
 
-  it('verifies and settles via x402 facilitator and returns PAYMENT-RESPONSE receipt', async () => {
+  it('verifies and settles via x402 facilitator with decoded PaymentPayload object and returns PAYMENT-RESPONSE receipt', async () => {
     const mockFetch = vi
       .fn()
       .mockResolvedValueOnce(
@@ -128,6 +140,12 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
         )
       );
 
+    const signedPayload = encodeBase64Json({
+      x402Version: 2,
+      accepted: { scheme: 'exact', network: 'eip155:8453' },
+      payload: { signature: '0xsigned_eip712', authorization: { from: '0xAgentWallet' } },
+    });
+
     const res = await handleMcpRequest(
       makeRpcRequest(
         {
@@ -139,7 +157,7 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
             arguments: { turns: 24, minSweBenchPct: 80 },
           },
         },
-        { 'PAYMENT-SIGNATURE': 'base64_signed_eip712_payload' }
+        { 'PAYMENT-SIGNATURE': signedPayload }
       ),
       baseEnv,
       mockFetch as unknown as typeof fetch
@@ -147,6 +165,18 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
 
     expect(res.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toBe('https://facilitator.payai.network/verify');
+    expect(mockFetch.mock.calls[1][0]).toBe('https://facilitator.payai.network/settle');
+    const verifyBody = JSON.parse(String((mockFetch.mock.calls[0][1] as RequestInit).body)) as {
+      x402Version: number;
+      paymentPayload: { payload?: { signature?: string } };
+      paymentRequirements: { extra?: { assetTransferMethod?: string } };
+    };
+    expect(verifyBody.x402Version).toBe(2);
+    expect(typeof verifyBody.paymentPayload).toBe('object');
+    expect(verifyBody.paymentPayload.payload?.signature).toBe('0xsigned_eip712');
+    expect(verifyBody.paymentRequirements.extra?.assetTransferMethod).toBe('eip3009');
+
     const receiptHeader = res.headers.get('PAYMENT-RESPONSE');
     expect(receiptHeader).toBeTruthy();
 
@@ -159,6 +189,28 @@ describe('AgentCostLab x402 Pay-Per-Call MCP Server', () => {
     };
     expect(body.result.structuredContent.recommendedSingleModel.name).toBeTruthy();
     expect(body.result.structuredContent.paretoFrontier.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('rejects malformed PAYMENT-SIGNATURE header with 402 without calling facilitator', async () => {
+    const mockFetch = vi.fn();
+    const res = await handleMcpRequest(
+      makeRpcRequest(
+        {
+          jsonrpc: '2.0',
+          id: 51,
+          method: 'tools/call',
+          params: {
+            name: 'recommend_pareto_route',
+            arguments: { turns: 24 },
+          },
+        },
+        { 'PAYMENT-SIGNATURE': 'not-valid-base64-json!' }
+      ),
+      baseEnv,
+      mockFetch as unknown as typeof fetch
+    );
+    expect(res.status).toBe(402);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('supports X-DEMO-MODE dry run for audit_prompt_cache_tax', async () => {

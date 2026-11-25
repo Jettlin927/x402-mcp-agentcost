@@ -6,7 +6,7 @@
   "vars": {
     "X402_NETWORK": "eip155:8453",
     "X402_ASSET": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "X402_FACILITATOR_URL": "https://x402.org/facilitator",
+    "X402_FACILITATOR_URL": "https://facilitator.payai.network",
     "X402_ENFORCE": "true",
     "X402_ALLOW_DEMO": "true",
     "SEC_USER_AGENT": "JettLinResearch/1.0 contact@agentcostlab.dev"

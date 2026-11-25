@@ -35,6 +35,7 @@ export interface X402PaymentOption {
   extra: {
     name: string;
     version: string;
+    assetTransferMethod?: string;
     priceUsd: string;
   };
 }
@@ -72,7 +73,7 @@ export interface X402VerifyResult {
 
 const DEFAULT_NETWORK = 'eip155:8453'; // Base Mainnet
 const DEFAULT_USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const DEFAULT_FACILITATOR = 'https://x402.org/facilitator';
+const DEFAULT_FACILITATOR = 'https://facilitator.payai.network';
 const DEFAULT_PLACEHOLDER_WALLET = '0x000000000000000000000000000000000000dEaD';
 
 export function usdToUsdcAtomic(usd: number): string {
@@ -127,6 +128,7 @@ export function buildPaymentChallenge(
         extra: {
           name: 'USD Coin',
           version: '2',
+          assetTransferMethod: 'eip3009',
           priceUsd: `$${opts.priceUsd.toFixed(4)}`,
         },
       },
@@ -200,6 +202,22 @@ export async function verifyAndSettleX402(
     return { valid: false, reason: 'Missing PAYMENT-SIGNATURE header' };
   }
 
+  let paymentPayload: Record<string, unknown>;
+  try {
+    const trimmed = paymentHeader.trim();
+    const parsed = trimmed.startsWith('{')
+      ? JSON.parse(trimmed)
+      : decodeBase64Json<unknown>(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { valid: false, reason: 'Malformed PAYMENT-SIGNATURE payload' };
+    }
+    paymentPayload = parsed as Record<string, unknown>;
+  } catch {
+    return { valid: false, reason: 'Malformed PAYMENT-SIGNATURE payload (expected Base64-encoded JSON)' };
+  }
+
+  const x402Version =
+    typeof paymentPayload.x402Version === 'number' ? paymentPayload.x402Version : 2;
   const facilitator = (env.X402_FACILITATOR_URL || DEFAULT_FACILITATOR).replace(/\/$/, '');
   const paymentRequirements = challenge.accepts[0];
 
@@ -208,8 +226,8 @@ export async function verifyAndSettleX402(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        x402Version: 2,
-        paymentPayload: paymentHeader,
+        x402Version,
+        paymentPayload,
         paymentRequirements,
       }),
     });
@@ -232,8 +250,8 @@ export async function verifyAndSettleX402(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        x402Version: 2,
-        paymentPayload: paymentHeader,
+        x402Version,
+        paymentPayload,
         paymentRequirements,
       }),
     });

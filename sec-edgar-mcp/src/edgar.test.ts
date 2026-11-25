@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearEdgarCache, stripSecHtmlToText } from './edgar';
+import { clearEdgarCache, parse13fInfoTableXml, stripSecHtmlToText } from './edgar';
 import { handleSecEdgarRequest, type WorkerEnv } from './index';
-import { decodeBase64Json, type X402ChallengePayload } from './x402';
+import { decodeBase64Json, encodeBase64Json, type X402ChallengePayload } from './x402';
 
 const baseEnv: WorkerEnv = {
   X402_PAY_TO: '0x1111111111111111111111111111111111111111',
@@ -285,6 +285,59 @@ const MOCK_FORM4_XML = `<?xml version="1.0"?>
   </nonDerivativeTable>
 </ownershipDocument>`;
 
+const MOCK_13F_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<ns1:informationTable xmlns:ns1="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>ALLY FINL INC</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>02005N100</ns1:cusip>
+    <ns1:value>400000000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>10000000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>DFND</ns1:investmentDiscretion>
+    <ns1:votingAuthority>
+      <ns1:Sole>10000000</ns1:Sole>
+      <ns1:Shared>0</ns1:Shared>
+      <ns1:None>0</ns1:None>
+    </ns1:votingAuthority>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>ALLY FINL INC</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>02005N100</ns1:cusip>
+    <ns1:value>100000000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>2500000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>DFND</ns1:investmentDiscretion>
+    <ns1:votingAuthority>
+      <ns1:Sole>2500000</ns1:Sole>
+      <ns1:Shared>0</ns1:Shared>
+      <ns1:None>0</ns1:None>
+    </ns1:votingAuthority>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>APPLE INC</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>037833100</ns1:cusip>
+    <ns1:value>500000000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>2000000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:putCall>Put</ns1:putCall>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+    <ns1:votingAuthority>
+      <ns1:Sole>2000000</ns1:Sole>
+      <ns1:Shared>0</ns1:Shared>
+      <ns1:None>0</ns1:None>
+    </ns1:votingAuthority>
+  </ns1:infoTable>
+</ns1:informationTable>`;
+
 function makeMockSecFetch() {
   return vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -304,6 +357,56 @@ function makeMockSecFetch() {
     }
     if (url.endsWith('/000114036126042798/ef20085077_8k.htm')) {
       return new Response(MOCK_8K_HTML, { status: 200 });
+    }
+    if (url.endsWith('/CIK0001067983.json') && url.includes('/submissions/')) {
+      return new Response(
+        JSON.stringify({
+          cik: '0001067983',
+          name: 'BERKSHIRE HATHAWAY INC',
+          filings: {
+            recent: {
+              accessionNumber: ['0001193125-26-463399'],
+              filingDate: ['2026-11-16'],
+              reportDate: ['2026-09-30'],
+              form: ['13F-HR'],
+              primaryDocument: ['xslForm13F_X02/primary_doc.xml'],
+            },
+          },
+        }),
+        { status: 200 }
+      );
+    }
+    if (url.endsWith('/1067983/000119312526463399/index.json')) {
+      return new Response(
+        JSON.stringify({
+          directory: {
+            item: [{ name: 'primary_doc.xml' }, { name: '60471.xml' }],
+          },
+        }),
+        { status: 200 }
+      );
+    }
+    if (url.endsWith('/1067983/000119312526463399/60471.xml')) {
+      return new Response(MOCK_13F_XML, { status: 200 });
+    }
+    if (url.startsWith('https://efts.sec.gov/LATEST/search-index') && url.includes('forms=13F-HR')) {
+      return new Response(
+        JSON.stringify({
+          hits: {
+            total: { value: 1 },
+            hits: [
+              {
+                _id: '0001193125-26-463399:primary_doc.xml',
+                _source: {
+                  display_names: ['BERKSHIRE HATHAWAY INC (CIK 0001067983)'],
+                  ciks: ['0001067983'],
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
     }
     if (url.startsWith('https://efts.sec.gov/LATEST/search-index')) {
       return new Response(
@@ -377,7 +480,7 @@ describe('SEC EDGAR x402 Pay-Per-Call MCP Server', () => {
     expect(manifest.status).toBe(200);
     const json = (await manifest.json()) as { paymentProtocol: string; tools: unknown[] };
     expect(json.paymentProtocol).toBe('x402-v2');
-    expect(json.tools.length).toBe(7);
+    expect(json.tools.length).toBe(8);
 
     const llms = await handleSecEdgarRequest(
       new Request('https://x402-mcp-sec-edgar.jettlin666.workers.dev/llms.txt'),
@@ -540,10 +643,12 @@ describe('SEC EDGAR x402 Pay-Per-Call MCP Server', () => {
     const secFetch = makeMockSecFetch();
     const combinedFetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.endsWith('/verify')) {
+      if (url === 'https://facilitator.payai.network/verify') {
+        const body = JSON.parse(String(init?.body)) as { paymentPayload: unknown };
+        expect(typeof body.paymentPayload).toBe('object');
         return new Response(JSON.stringify({ isValid: true, payer: '0xTraderBot' }), { status: 200 });
       }
-      if (url.endsWith('/settle')) {
+      if (url === 'https://facilitator.payai.network/settle') {
         return new Response(
           JSON.stringify({ success: true, transaction: '0xtx999', payer: '0xTraderBot' }),
           { status: 200 }
@@ -552,12 +657,18 @@ describe('SEC EDGAR x402 Pay-Per-Call MCP Server', () => {
       return secFetch(input, init);
     });
 
+    const signedPayment = encodeBase64Json({
+      x402Version: 2,
+      accepted: { scheme: 'exact', network: 'eip155:8453' },
+      payload: { signature: '0xmock_sig', authorization: { from: '0xTraderBot' } },
+    });
+
     const res = await handleSecEdgarRequest(
       new Request('https://x402-mcp-sec-edgar.jettlin666.workers.dev/api/compare-sec-peers', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'PAYMENT-SIGNATURE': 'signed-base-usdc-payload',
+          'PAYMENT-SIGNATURE': signedPayment,
         },
         body: JSON.stringify({ tickers: ['AAPL', 'MSFT'], periodType: 'annual' }),
       }),
@@ -707,6 +818,71 @@ describe('SEC EDGAR x402 Pay-Per-Call MCP Server', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tickerOrCik: 'AAPL', form: '8-K' }),
+      }),
+      baseEnv
+    );
+    expect(res.status).toBe(402);
+    const challenge = decodeBase64Json<X402ChallengePayload>(res.headers.get('PAYMENT-REQUIRED')!);
+    expect(challenge.accepts[0].amount).toBe('12000');
+    expect(challenge.extensions?.bazaar?.info.input.type).toBe('http');
+  });
+
+  it('parses namespaced Form 13F-HR infotable XML, consolidates sub-account CUSIPs, and computes weights', async () => {
+    const rawRows = parse13fInfoTableXml(MOCK_13F_XML);
+    expect(rawRows.length).toBe(3);
+
+    const mockFetch = makeMockSecFetch();
+    const res = await handleSecEdgarRequest(
+      new Request('https://x402-mcp-sec-edgar.jettlin666.workers.dev/api/sec-13f-holdings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-DEMO-MODE': 'true' },
+        body: JSON.stringify({
+          managerOrCik: 'Berkshire Hathaway',
+          limit: 10,
+        }),
+      }),
+      baseEnv,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      manager: { cik: string; name: string };
+      filing: { form: string; reportDate: string; infoTableUrl: string };
+      summary: { totalValueUsd: number; totalLineItems: number; uniquePositions: number };
+      holdings: {
+        nameOfIssuer: string;
+        cusip: string;
+        valueUsd: number;
+        shares: number;
+        weightPct: number;
+        putCall: string | null;
+        lineItemsCount: number;
+      }[];
+    };
+    expect(json.manager.cik).toBe('0001067983');
+    expect(json.filing.form).toBe('13F-HR');
+    expect(json.filing.infoTableUrl).toBe(
+      'https://www.sec.gov/Archives/edgar/data/1067983/000119312526463399/60471.xml'
+    );
+    expect(json.summary.totalValueUsd).toBe(1_000_000_000);
+    expect(json.summary.totalLineItems).toBe(3);
+    expect(json.summary.uniquePositions).toBe(2);
+    expect(json.holdings[0].nameOfIssuer).toBe('ALLY FINL INC');
+    expect(json.holdings[0].valueUsd).toBe(500_000_000);
+    expect(json.holdings[0].shares).toBe(12_500_000);
+    expect(json.holdings[0].weightPct).toBe(50);
+    expect(json.holdings[0].lineItemsCount).toBe(2);
+    expect(json.holdings[1].putCall).toBe('PUT');
+    expect(json.holdings[1].weightPct).toBe(50);
+  });
+
+  it('returns HTTP 402 Bazaar challenge ($0.012 USDC) for /api/sec-13f-holdings', async () => {
+    const res = await handleSecEdgarRequest(
+      new Request('https://x402-mcp-sec-edgar.jettlin666.workers.dev/api/sec-13f-holdings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ managerOrCik: '0001067983' }),
       }),
       baseEnv
     );
